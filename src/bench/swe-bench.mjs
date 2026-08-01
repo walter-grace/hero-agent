@@ -37,29 +37,52 @@ export function loadSweBench(path, { instance } = {}) {
   return rows;
 }
 
-export async function runSweBench({ apiKey, instances, out = "predictions.jsonl", model = "auto", maxSteps = 40, onEvent = () => {} }) {
+export async function runSweBench({ apiKey, instances, out = "predictions.jsonl", model = "auto", maxSteps = 40, nudges = 2, onEvent = () => {} }) {
   const provider = heroRun({ apiKey });
   writeFileSync(out, ""); // fresh predictions file
   const results = [];
+  const currentPatch = async (ex) => (await ex.exec("git add -A && git diff --cached", { timeout: 60000 })).stdout || "";
   for (const inst of instances) {
     const ex = new LocalExecutor();
-    let patch = "", costHero = 0, err = null;
+    let patch = "", costHero = 0, err = null, attempts = 0;
     try {
       const url = `https://github.com/${inst.repo}.git`;
       // Fetch only the one commit we need (fast even for large repos like django).
       const setup = await ex.exec(`git init -q && git remote add origin ${url} && git fetch -q --depth 1 origin ${inst.base_commit} && git checkout -q FETCH_HEAD`, { timeout: 300000 });
       if (setup.code !== 0) throw new Error(`checkout failed: ${setup.stderr.slice(0, 200)}`);
-      const agent = new Harness({ provider, memory: scratch(), tools: shellTools(ex), system: SYSTEM, model, maxSteps, compactEvery: Infinity, onEvent });
-      ({ costHero } = await agent.run(inst.problem_statement));
-      const diff = await ex.exec("git add -A && git diff --cached", { timeout: 60000 });
-      patch = diff.stdout || "";
+      // In-task memory so a re-nudge continues from what the agent already explored (not from scratch).
+      const agent = new Harness({ provider, memory: ramMemory(), tools: shellTools(ex), system: SYSTEM, model, maxSteps, compactEvery: Infinity, onEvent });
+      // The observed failure mode was the model concluding in prose without ever calling write_file,
+      // leaving an empty diff. So: run, and if nothing changed on disk, nudge it to actually edit and
+      // run again (bounded). This is model-agnostic — it needs a real edit, not a specific model.
+      for (let a = 0; a <= nudges; a++) {
+        attempts = a + 1;
+        const prompt = a === 0 ? inst.problem_statement
+          : "You have NOT modified any source file yet — `git` shows no changes, so nothing you did counts. Find the exact source file responsible and use write_file to make the fix RIGHT NOW, then read it back to confirm. Do not explain; edit.";
+        const r = await agent.run(prompt);
+        costHero += r.costHero || 0;
+        patch = await currentPatch(ex);
+        if (patch.trim()) break;
+        onEvent("nudge", { instance_id: inst.instance_id, attempt: a + 1 });
+      }
     } catch (e) { err = e.message; }
     finally { await ex.cleanup(); }
     if (patch.trim()) appendFileSync(out, JSON.stringify({ instance_id: inst.instance_id, model_name_or_path: MODEL_NAME, model_patch: patch }) + "\n");
-    results.push({ instance_id: inst.instance_id, produced: !!patch.trim(), costHero, err });
-    onEvent("instance", { instance_id: inst.instance_id, produced: !!patch.trim(), costHero, err });
+    results.push({ instance_id: inst.instance_id, produced: !!patch.trim(), costHero, attempts, err });
+    onEvent("instance", { instance_id: inst.instance_id, produced: !!patch.trim(), costHero, attempts, err });
   }
   return { out, results, produced: results.filter((r) => r.produced).length, total: results.length };
 }
 
-const scratch = () => ({ append: async () => {}, getRoot: async () => null, sinceRoot: async () => [], setRoot: async () => {} });
+// In-RAM memory that persists for the duration of one instance (no disk, no compaction), so a
+// re-nudge run sees what the earlier run already explored instead of starting over.
+const ramMemory = () => {
+  const items = [];
+  return {
+    append: async (es) => { for (const e of es) items.push({ ...e, seq: items.length + 1 }); },
+    raw: async () => items,
+    getRoot: async () => null,
+    sinceRoot: async () => items,
+    setRoot: async () => {},
+  };
+};
