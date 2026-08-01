@@ -1,4 +1,4 @@
-// On-chain memory backend — the differentiator. Memories are AES-256-GCM encrypted with a key
+// On-chain memory backend: the differentiator. Memories are AES-256-GCM encrypted with a key
 // derived from the agent wallet's own signature, gzip'd, and written to the Agent Memory contract on
 // Robinhood Chain. On-chain observers (and Hero Run) see only random bytes; only the wallet that
 // holds AGENT_PRIVATE_KEY can decrypt. Raw checkpoints are immutable leaves; the ROOT index from
@@ -60,7 +60,7 @@ export class OnchainMemory {
     return this.wallet.sendTransaction({ to: MEM_ADDR, data: call });
   }
   // Checkpoint(uint256 indexed agentId, uint64 indexed era, uint64 seq, uint64 prevBlock,
-  //            bytes32 hash, bytes32 prevHash, bytes data) — agentId + era are indexed (topics).
+  //            bytes32 hash, bytes32 prevHash, bytes data): agentId + era are indexed (topics).
   // The encrypted payload is the trailing `data` bytes param in the event DATA, not the whole DATA.
   // ⚠️ v0.1: write (append/encrypt) is complete and correct; READ decodes the `data` param but does
   // NOT yet verify the prevBlock/hash chain. For tamper-proof reads, port decodeCheckpoint + the
@@ -75,7 +75,7 @@ export class OnchainMemory {
     for (const l of logs) {
       try {
         // event DATA = seq(32) prevBlock(32) hash(32) prevHash(32) offset(32) len(32) bytes… ; the
-        // `data` bytes is the last dynamic param — read its length then that many bytes.
+        // `data` bytes is the last dynamic param: read its length then that many bytes.
         const hex = (l.data || "0x").slice(2);
         const off = parseInt(hex.slice(4 * 64, 5 * 64), 16) * 2;      // offset to the bytes param
         const len = parseInt(hex.slice(off, off + 64), 16) * 2;        // its byte length

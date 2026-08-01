@@ -1,5 +1,5 @@
 // Minimal MCP (Model Context Protocol) stdio client. Point the harness at any MCP server (filesystem,
-// search, github, your own) and its tools become the agent's tools — picoclaw/Hermes extensibility.
+// search, github, your own) and its tools become the agent's tools: picoclaw/Hermes extensibility.
 // Config shape: [{ name, command, args?, env? }]. Returns tools in the harness's { def, run } shape.
 import { spawn } from "node:child_process";
 

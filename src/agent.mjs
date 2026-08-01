@@ -1,4 +1,4 @@
-// hero-agent — a Harness wired to Hero Run's brain, a memory backend, and the built-in + MCP tools.
+// hero-agent: a Harness wired to Hero Run's brain, a memory backend, and the built-in + MCP tools.
 // This is the "agent" (persona + capabilities); the Harness is "what controls it".
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,8 +11,8 @@ import { mcpTools } from "./tools/mcp.mjs";
 
 const DEFAULT_SYSTEM =
   "You are a Hero Agent: a personal AI whose brain runs on Hero Run and whose memory lives in a " +
-  "wallet-owned, compacting store. Below (if present) is your ROOT memory index — the current merged " +
-  "state of everything you know — plus your recent raw memories. Treat them as your own past. Use " +
+  "wallet-owned, compacting store. Below (if present) is your ROOT memory index, the current merged " +
+  "state of everything you know, plus your recent raw memories. Treat them as your own past. Use " +
   "tools when you need live information or to make something. Be concise, accurate, and natural.";
 
 // Load skills: any SKILL.md files under ./skills are appended to the system prompt (picoclaw idea).

@@ -1,4 +1,4 @@
-// hero-harness — the runtime that hosts an agent: the loop, the tool layer, the pluggable memory, and
+// hero-harness: the runtime that hosts an agent: the loop, the tool layer, the pluggable memory, and
 // sub-agents. Provider-agnostic (anything with a .chat()) and memory-agnostic (LocalMemory or
 // OnchainMemory). This is "what controls the agent"; the agent (agent.mjs) is just a configured
 // Harness. Design leans Hermes: light, disk-first/pluggable memory, stateless sub-agents.
@@ -80,7 +80,7 @@ export class Harness {
     return next;
   }
 
-  // Stateless sub-agent: a fresh Harness with the SAME tools/provider but NO memory writes — for
+  // Stateless sub-agent: a fresh Harness with the SAME tools/provider but NO memory writes: for
   // parallel specialist subtasks (research / draft / review) without polluting the main memory.
   async subagent(task, { system } = {}) {
     const scratch = { append: async () => {}, getRoot: async () => null, sinceRoot: async () => [], setRoot: async () => {} };

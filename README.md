@@ -1,8 +1,8 @@
 # hero-agent
 
-A personal AI agent with a memory that's actually **yours** — wallet-owned, compacting, and (optionally) sealed encrypted onto **Robinhood Chain**. Its brain is **[Hero Run](https://herorunai.com)**: one key, one endpoint, auto-routed across ~15 inference providers and billed in $HERO. No per-provider keys, no model config.
+A personal AI agent whose memory belongs to you: wallet-owned, compacting, and optionally sealed encrypted onto **Robinhood Chain**. Its brain is **[Hero Run](https://herorunai.com)**. You set one key and one endpoint; Hero Run auto-routes each call across ~15 inference providers and bills in $HERO. No per-provider keys. No model config.
 
-Built on **`hero-harness`** — the small, provider- and memory-agnostic runtime that hosts it (the loop, the tool layer, pluggable memory, and stateless sub-agents). Inspired by picoclaw's tiny agent loop and Hermes' disk-first, drop-on-a-$5-VPS design — with one thing they don't have: memory you own and can carry between agents, because your wallet is the only key.
+It runs on **`hero-harness`**, a small runtime that stays agnostic to the provider and the memory backend. The harness owns the loop, the tool layer, the pluggable memory, and stateless sub-agents. picoclaw shaped the tiny agent loop; Hermes shaped the disk-first design you can drop on a $5 VPS. hero-agent adds memory you own and carry between agents, since your wallet holds the only key.
 
 ```
 input → Hero Run (brain) → tools (web search · generate · MCP) → output
@@ -20,28 +20,29 @@ export HERO_RUN_KEY=hr_live_...   # mint one at https://herorunai.com/keys
 node bin/hero-agent.mjs chat      # talk to it; it remembers across sessions
 ```
 
-That's it — no OpenAI/Anthropic keys, no model list. The default memory is a local JSONL file, so it runs anywhere.
+You need no OpenAI or Anthropic key and no model list. Memory defaults to a local JSONL file, so a fresh clone runs on any machine with Node 20.
 
 ## Commands
 
 ```bash
-hero-agent chat                       # interactive REPL, remembers + compacts automatically
+hero-agent chat                       # interactive REPL that remembers and compacts as you go
 hero-agent run "research X and summarize"
 hero-agent remember "I prefer dark roasts"
 hero-agent recall                     # print the ROOT index + memory stats
 hero-agent compact                    # force a compaction now
+hero-agent bench                      # measure real cost per task
 ```
 
 Flags: `--memory local|onchain` · `--file <path>` · `--agent <id>` · `--mcp "fs:npx -y @modelcontextprotocol/server-filesystem ."`
 
 ## Memory: compaction, not a growing transcript
 
-Raw memories are **append-only leaves and never deleted**. Compaction builds a small, constant-cost **ROOT index** on top of them — the agent reads the ROOT + only what's new, so it knows what it knows without replaying its whole history. Two ideas drive it:
+Raw memories are append-only leaves. The agent never deletes them. Compaction builds a small, constant-cost **ROOT index** on top, and the agent reads the ROOT plus only what arrived since. So it recalls what it knows without replaying its whole history. Two ideas drive it:
 
 - **Hierarchical compaction** ([openclaw#51612](https://github.com/openclaw/openclaw/issues/51612)): summarize into an index, keep the raw beneath.
-- **Log-structured merge** ([RocksDB compaction](https://github.com/facebook/rocksdb/wiki/Compaction)): when memories conflict about the same thing, the **newest supersedes the stale** — a changed preference or reversed decision keeps only the current state.
+- **Log-structured merge** ([RocksDB compaction](https://github.com/facebook/rocksdb/wiki/Compaction)): when two memories conflict about the same thing, the newest supersedes the stale one. A changed preference or a reversed decision keeps only the current state.
 
-The compaction prompt is accuracy-first: preserve every concrete fact/identifier, never invent, newest-wins, keep-if-unsure. (Fixture-tested: a light→dark preference flip keeps *dark*, preserves an account number verbatim, drops chit-chat, invents nothing.)
+The compaction prompt preserves every concrete fact and identifier, never invents, resolves conflicts newest-wins, and keeps anything it is unsure about. A fixture test confirms it: feed a light-to-dark roast preference flip and it keeps dark, preserves the account number verbatim, and drops the chit-chat.
 
 ### On-chain memory (optional)
 
@@ -50,19 +51,19 @@ export AGENT_PRIVATE_KEY=0x...        # a wallet you control, with a little Robi
 hero-agent chat --memory onchain --agent 7
 ```
 
-Each memory is AES-256-GCM encrypted with a key derived from your wallet's signature, gzip'd, and checkpointed to the Agent Memory contract on Robinhood Chain. On-chain (and to Hero Run) it's just random bytes — only your wallet can decrypt. Because the key is the wallet's, **any agent you own can read another's memory**: one brain, many agents. Mint an agent at [herorunai.com/agent](https://herorunai.com/agent).
+Each memory gets AES-256-GCM encrypted with a key derived from your wallet's signature, gzip'd, and checkpointed to the Agent Memory contract on Robinhood Chain. On-chain, and to Hero Run, it reads as random bytes. Only your wallet decrypts it. Because the key comes from the wallet rather than the agent, any agent you own can read another's memory: one brain across many agents. Mint an agent at [herorunai.com/agent](https://herorunai.com/agent).
 
-## Cost per task — measured, not claimed
+## Cost per task
 
 ```bash
 hero-agent bench                 # runs a task suite, prints real cost/task vs other harnesses
 hero-agent bench --model cheapest --tasks 5
 ```
 
-The harness records the `$HERO` charged on every call (`x_hero.charged_hero`) and reports real cost-per-task at the live token price. Two structural levers keep it low:
+The harness records the $HERO charged on every call (`x_hero.charged_hero`) and reports cost per task at the live token price. Two levers keep it low:
 
-1. **Auto-routing** — Hero Run picks the cheapest *capable* model per call (including **$0 free-served** ones like DeepSeek V4 Flash), so easy steps don't pay frontier prices.
-2. **Compaction** — the agent reads a small constant-size ROOT index instead of replaying its whole history, so token cost per turn stays flat as memory grows. In long agent runs this is the dominant saving.
+1. **Auto-routing.** Hero Run picks the cheapest capable model per call, including $0 free-served ones like DeepSeek V4 Flash, so easy steps skip frontier prices.
+2. **Compaction.** The agent reads a constant-size ROOT index instead of its whole history, so tokens per turn stay flat as memory grows. On long runs this saves the most.
 
 A measured run (light Q&A, `--model auto`, live prices):
 
@@ -76,13 +77,13 @@ A measured run (light Q&A, `--model auto`, live prices):
 | Kimi Code | $0.54 |
 | Claude Code | $1.47 |
 
-**Honest caveat:** that's *not* a like-for-like figure. The published numbers are for coding-agent harnesses on heavy SWE-style tasks with frontier models; our sample was light Q&A routed to cheap models. The takeaway isn't a headline multiplier — it's that this harness **measures** cost-per-task and is built to **minimize** it (cheap/free routing + compaction). For an apples-to-apples comparison, run the same task suite with a frontier tier pinned.
+Read that number carefully. It is not like-for-like. The published figures come from coding-agent harnesses running heavy SWE-style tasks on frontier models; the sample above was light Q&A routed to cheap models. What the harness gives you is a way to measure cost per task and levers to lower it (cheap and free routing, plus compaction). For a fair comparison, run the same task suite with a frontier tier pinned.
 
 ## Tools
 
-- **web_search** — live results (routed to Perplexity Sonar through Hero Run; no separate search key).
-- **hero_generate** — image or audio from a prompt.
-- **MCP** — point it at any [MCP](https://modelcontextprotocol.io) stdio server and its tools become the agent's tools.
+- **web_search**: live results, routed to Perplexity Sonar through Hero Run. No separate search key.
+- **hero_generate**: an image or an audio clip from a prompt.
+- **MCP**: point it at any [MCP](https://modelcontextprotocol.io) stdio server and its tools become the agent's tools.
 
 ## Use it as a library
 
@@ -92,11 +93,11 @@ const agent = await createHeroAgent({ apiKey: process.env.HERO_RUN_KEY });
 const { text } = await agent.run("What did we decide about the Seattle location?");
 ```
 
-`hero-harness` is exported separately (`hero-agent/harness`) if you want the runtime with your own provider/memory.
+`hero-harness` ships as its own export (`hero-agent/harness`) if you want the runtime with your own provider and memory.
 
 ## Skills
 
-Drop `SKILL.md` files in `./skills/` and they're appended to the agent's system prompt (picoclaw-style).
+Put `SKILL.md` files in `./skills/` and the agent appends them to its system prompt, the way picoclaw loads skills.
 
 ## License
 

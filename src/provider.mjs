@@ -1,4 +1,4 @@
-// Hero Run provider — the agent's brain. Hero Run is an OpenAI-compatible gateway that auto-routes
+// Hero Run provider: the agent's brain. Hero Run is an OpenAI-compatible gateway that auto-routes
 // each call to the best model across ~15 providers and bills in $HERO from your prepaid key, so the
 // harness needs no per-model config and no per-provider keys: one base URL, one key, model "auto".
 const BASE = process.env.HERO_RUN_URL || "https://herorunai.com";

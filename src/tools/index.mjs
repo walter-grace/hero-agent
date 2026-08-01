@@ -10,7 +10,7 @@ export function builtinTools(provider) {
         description: "Search the live web for current, factual information. Use for anything time-sensitive or not already in memory.",
         parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
       } },
-      // Routed to a live-search model (Perplexity Sonar) through Hero Run — no separate search key.
+      // Routed to a live-search model (Perplexity Sonar) through Hero Run: no separate search key.
       async run({ query }) {
         const msg = await provider.chat({ model: "perplexity/sonar-pro", maxTokens: 700, messages: [{ role: "user", content: String(query || "") }] });
         return msg.content || "(no results)";

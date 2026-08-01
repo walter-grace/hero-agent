@@ -1,4 +1,4 @@
-// Local memory backend — disk-first JSONL, zero dependencies. The Hermes-style default: drop the
+// Local memory backend: disk-first JSONL, zero dependencies. The Hermes-style default: drop the
 // agent on a $5 VPS and it just works, no wallet required. Raw memories are append-only leaves; a
 // ROOT index (from compaction) is written as a marked entry. Same interface as the on-chain backend,
 // so the harness and compaction don't care which one is in use.
