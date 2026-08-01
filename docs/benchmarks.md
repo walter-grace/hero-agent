@@ -23,12 +23,24 @@ With a matching model tier, cost per task lands near other harnesses running the
 
 ## Running real Terminal-Bench
 
-The built-in suite is for quick local validation. For the published agent-harness comparison, run against [Terminal-Bench](https://www.tbench.ai), which scores agent harnesses on containerized terminal tasks.
+The built-in suite is for quick local validation. For the published agent-harness comparison, run against [Terminal-Bench](https://www.tbench.ai), which scores agent harnesses on containerized terminal tasks. hero-agent ships an adapter, so it's one command once you have the dataset:
 
-The pieces you need:
+```bash
+git clone https://github.com/laude-institute/terminal-bench
+export HERO_RUN_KEY=hr_live_...          # funded; a full run is many frontier calls
+export DOCKER_HOST=...                    # Docker daemon must be running
 
-1. **The Docker executor** (`src/bench/executor.mjs`) already speaks `docker run` / `docker exec`. Point it at Terminal-Bench's per-task container instead of the default image.
-2. **A task adapter**: map a Terminal-Bench task's instruction to `agent.run(instruction)` and its test to the `verify` step. `runCodingBench` in `src/bench/run.mjs` takes any `{ id, instruction, setup, verify }` array, so a Terminal-Bench task loader drops straight in.
-3. **The shell tools** (`src/tools/shell.mjs`) give the agent the terminal, which is what Terminal-Bench expects an agent to drive.
+hero-agent terminal-bench --dataset ./terminal-bench --task hello-world   # one task
+hero-agent terminal-bench --dataset ./terminal-bench                       # the whole set
+```
 
-SWE-bench (Verified or Lite) works the same way: load the task, run the agent against the repo checkout in a container, and use the task's test patch as `verify`.
+For each task the adapter reads `task.yaml` for the instruction, builds the task's own container (Dockerfile or `docker-compose.yaml`), lets the agent drive it through the shell tools, then copies in `tests/` and runs `run-tests.sh`. All tests passing counts as solved. It reports pass rate and cost per task.
+
+Two knobs cover dataset variation, since the layout shifted between Terminal-Bench 1.x and 2.0 (Harbor):
+
+- `--service <name>`: the compose service the agent works in (default `client`).
+- `--tests-path <path>`: where `run-tests.sh` expects the tests (default `/app/tests`).
+
+The adapter is built to the documented task format and validated on the parser and file-detection side. Confirm the two knobs against your checkout before trusting the pass rate, since a dataset can wire tests differently.
+
+SWE-bench (Verified or Lite) fits the same runner: load the task, run the agent against the repo checkout in a container, and use the task's test patch as the verify step.

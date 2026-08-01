@@ -19,7 +19,8 @@
     "start": "node bin/hero-agent.mjs chat"
   },
   "optionalDependencies": {
-    "viem": "^2.21.0"
+    "viem": "^2.21.0",
+    "yaml": "^2.5.0"
   },
   "keywords": [
     "ai",

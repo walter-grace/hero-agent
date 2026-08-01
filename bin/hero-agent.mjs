@@ -95,6 +95,23 @@ async function main() {
     console.log("\nfor reference (published harness cost/task, heavier tasks): $0.39–$1.47");
     return;
   }
+  if (cmd === "terminal-bench") {
+    // Run against a checked-out Terminal-Bench dataset. Needs Docker + a funded key.
+    //   hero-agent terminal-bench --dataset ./terminal-bench --task hello-world --model auto
+    const { runTerminalBench } = await import("../src/bench/terminal-bench.mjs");
+    const dataset = flag("dataset");
+    if (!dataset) { console.error("Provide --dataset <path to a terminal-bench checkout>"); process.exit(1); }
+    const { heroUsd } = await import("../src/provider.mjs");
+    const price = await heroUsd();
+    console.error(`Terminal-Bench · dataset=${dataset}${flag("task") ? " · task~" + flag("task") : ""} · model=${flag("model", "auto")}\n`);
+    const r = await runTerminalBench({
+      apiKey: process.env.HERO_RUN_KEY, datasetDir: dataset, include: flag("task"),
+      model: flag("model", "auto"), service: flag("service"), testsPath: flag("tests-path"),
+      onEvent: (t, d) => { if (t === "task") process.stderr.write(`  ${d.solved ? "✓" : "✗"} ${d.id.padEnd(28)} ${Math.round(d.costHero)} $HERO ($${(d.costHero * price).toFixed(4)})${d.err ? " · " + d.err : ""}\n`); },
+    });
+    console.log(`\npass rate: ${r.solved}/${r.total} (${Math.round(r.passRate * 100)}%) · avg cost/task: $${r.avgCostUsd.toFixed(4)}`);
+    return;
+  }
   if (cmd === "recall") {
     const root = await memory.getRoot(); const raw = await memory.raw(); const since = await memory.sinceRoot();
     console.log(root?.text || "(no ROOT index yet)");
