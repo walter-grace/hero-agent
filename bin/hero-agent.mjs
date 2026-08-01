@@ -76,6 +76,25 @@ async function main() {
     for (const [name, usd] of [["Hermes Agent", 0.39], ["Pi Agent", 0.40], ["Codex", 0.47], ["OpenCode", 0.51], ["Kimi Code", 0.54], ["Claude Code", 1.47]]) console.log(`  $${usd.toFixed(2)}  ${name}`);
     return;
   }
+  if (cmd === "bench-code") {
+    // Real coding benchmark: the agent solves tasks in a sandbox; each is scored by running a
+    // verifier (exit 0 = solved). Reports pass rate + cost. --executor local|docker, --model, --tasks.
+    const { runCodingBench } = await import("../src/bench/run.mjs");
+    const { CODING_TASKS } = await import("../src/bench/tasks.mjs");
+    const { heroUsd } = await import("../src/provider.mjs");
+    const n = Math.min(Number(flag("tasks", CODING_TASKS.length)), CODING_TASKS.length);
+    const ex = flag("executor", "local");
+    const mode = flag("model", "auto");
+    const price = await heroUsd();
+    console.error(`Coding bench · ${n} tasks · executor=${ex} · model=${mode}\n`);
+    const r = await runCodingBench({ apiKey: process.env.HERO_RUN_KEY, tasks: CODING_TASKS.slice(0, n), executor: ex, model: mode,
+      onEvent: (t, d) => { if (t === "task") process.stderr.write(`  ${d.solved ? "✓" : "✗"} ${d.id.padEnd(12)} ${Math.round(d.costHero)} $HERO ($${(d.costHero * price).toFixed(4)})${d.err ? " · " + d.err : ""}\n`); } });
+    console.log(`\npass rate: ${r.solved}/${r.total} (${Math.round(r.passRate * 100)}%)`);
+    console.log(`avg cost/task: ${Math.round(r.avgCostHero)} $HERO ($${r.avgCostUsd.toFixed(4)})`);
+    if (r.costPerSolvedUsd != null) console.log(`cost/solved:   $${r.costPerSolvedUsd.toFixed(4)}`);
+    console.log("\nfor reference (published harness cost/task, heavier tasks): $0.39–$1.47");
+    return;
+  }
   if (cmd === "recall") {
     const root = await memory.getRoot(); const raw = await memory.raw(); const since = await memory.sinceRoot();
     console.log(root?.text || "(no ROOT index yet)");

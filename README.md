@@ -30,7 +30,8 @@ hero-agent run "research X and summarize"
 hero-agent remember "I prefer dark roasts"
 hero-agent recall                     # print the ROOT index + memory stats
 hero-agent compact                    # force a compaction now
-hero-agent bench                      # measure real cost per task
+hero-agent bench                      # measure cost per task on a light suite
+hero-agent bench-code                 # coding benchmark: solve tasks in a sandbox, score pass rate + cost
 ```
 
 Flags: `--memory local|onchain` · `--file <path>` · `--agent <id>` · `--mcp "fs:npx -y @modelcontextprotocol/server-filesystem ."`
@@ -64,7 +65,18 @@ hero-agent bench --model cheapest --tasks 5
 
 Two design choices move the number. Routing sizes each call to the step instead of pinning one model for everything. Compaction keeps the context the agent reads roughly flat as memory grows, so tokens per turn do not scale with history. How much each helps depends on the workload, which is why `bench` measures it rather than asserting it.
 
-For context, published cost-per-task figures for other agent harnesses sit in a range of roughly $0.39 to $1.47. Those come from heavier coding benchmarks on frontier models, so read them as background, not a head-to-head. To get a number you can compare, run the same task suite through each harness at a matching model tier.
+For context, published cost-per-task figures for other agent harnesses sit in a range of roughly $0.39 to $1.47. Those come from heavier coding benchmarks on frontier models, so read them as background, not a head-to-head. To get a number you can compare, run the coding benchmark below at a matching model tier.
+
+## Coding benchmark
+
+`bench-code` scores the agent objectively: it solves a task in a sandbox, then a verifier runs (exit 0 means solved). Each run reports pass rate and cost per task.
+
+```bash
+hero-agent bench-code                     # built-in suite, local temp-dir sandbox
+hero-agent bench-code --executor docker   # one container per task (real isolation)
+```
+
+The agent gets `shell`, `write_file`, and `read_file` tools inside a fresh sandbox per task. For the published comparison, run against [Terminal-Bench](https://www.tbench.ai) or SWE-bench with the Docker executor. See [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Tools
 
