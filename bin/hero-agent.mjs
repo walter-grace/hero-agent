@@ -69,10 +69,11 @@ async function main() {
       catch (e) { process.stderr.write(`  ${i + 1}. skipped: ${e.message}\n`); }
     }
     const avgHero = ran ? totalHero / ran : 0; const avgUsd = avgHero * price;
-    console.log(`\n=== cost per task (avg over ${ran}) ===`);
-    const board = [["Hero Agent", avgUsd], ["Hermes Agent", 0.39], ["Pi Agent", 0.40], ["Codex", 0.47], ["OpenCode", 0.51], ["Kimi Code", 0.54], ["Claude Code", 1.47]];
-    board.sort((a, b) => a[1] - b[1]);
-    for (const [name, usd] of board) console.log(`  $${usd.toFixed(4).padStart(7)}  ${name === "Hero Agent" ? "▶ " : "  "}${name}`);
+    console.log(`\ncost per task (avg over ${ran}, model=${mode}): ${Math.round(avgHero)} $HERO  ($${avgUsd.toFixed(4)})`);
+    // Published figures from other harnesses, for context only (heavier coding tasks on frontier
+    // models — not a like-for-like comparison with the suite above).
+    console.log("\nfor reference (published, heavier tasks):");
+    for (const [name, usd] of [["Hermes Agent", 0.39], ["Pi Agent", 0.40], ["Codex", 0.47], ["OpenCode", 0.51], ["Kimi Code", 0.54], ["Claude Code", 1.47]]) console.log(`  $${usd.toFixed(2)}  ${name}`);
     return;
   }
   if (cmd === "recall") {

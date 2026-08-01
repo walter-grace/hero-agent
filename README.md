@@ -55,29 +55,16 @@ Each memory gets AES-256-GCM encrypted with a key derived from your wallet's sig
 
 ## Cost per task
 
+hero-agent instruments its own cost. Every model call records the $HERO charged (`x_hero.charged_hero`), and `bench` reports cost per task at the live token price, so you can compare configurations and track cost as you change the setup.
+
 ```bash
-hero-agent bench                 # runs a task suite, prints real cost/task vs other harnesses
+hero-agent bench
 hero-agent bench --model cheapest --tasks 5
 ```
 
-The harness records the $HERO charged on every call (`x_hero.charged_hero`) and reports cost per task at the live token price. Two levers keep it low:
+Two design choices move the number. Routing sizes each call to the step instead of pinning one model for everything. Compaction keeps the context the agent reads roughly flat as memory grows, so tokens per turn do not scale with history. How much each helps depends on the workload, which is why `bench` measures it rather than asserting it.
 
-1. **Auto-routing.** Hero Run picks the cheapest capable model per call, including $0 free-served ones like DeepSeek V4 Flash, so easy steps skip frontier prices.
-2. **Compaction.** The agent reads a constant-size ROOT index instead of its whole history, so tokens per turn stay flat as memory grows. On long runs this saves the most.
-
-A measured run (light Q&A, `--model auto`, live prices):
-
-| agent | $/task |
-|---|---|
-| **Hero Agent** | **~$0.0002** (measured) |
-| Hermes Agent | $0.39 |
-| Pi Agent | $0.40 |
-| Codex | $0.47 |
-| OpenCode | $0.51 |
-| Kimi Code | $0.54 |
-| Claude Code | $1.47 |
-
-Read that number carefully. It is not like-for-like. The published figures come from coding-agent harnesses running heavy SWE-style tasks on frontier models; the sample above was light Q&A routed to cheap models. What the harness gives you is a way to measure cost per task and levers to lower it (cheap and free routing, plus compaction). For a fair comparison, run the same task suite with a frontier tier pinned.
+For context, published cost-per-task figures for other agent harnesses sit in a range of roughly $0.39 to $1.47. Those come from heavier coding benchmarks on frontier models, so read them as background, not a head-to-head. To get a number you can compare, run the same task suite through each harness at a matching model tier.
 
 ## Tools
 
