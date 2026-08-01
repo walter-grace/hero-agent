@@ -12,7 +12,7 @@ import { keccak256, toBytes, toHex, encodeFunctionData, createWalletClient, crea
 import { privateKeyToAccount } from "viem/accounts";
 
 const MEM_ADDR = process.env.HERO_MEM_ADDR || "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
-const RH_RPC = process.env.RH_RPC || "https://rpc.robinhood.com"; // override with a known-good RH RPC
+const RH_RPC = process.env.RH_RPC || "https://rpc.mainnet.chain.robinhood.com";
 const KEY_MSG = `Hero Agent Memory encryption key v1\nContract: ${MEM_ADDR}\nChain: 4663`;
 const ROOT_MARK = "root::";
 const ABI = [
@@ -59,18 +59,30 @@ export class OnchainMemory {
     const call = encodeFunctionData({ abi: ABI, functionName: "checkpoint", args: [this.agentId, data] });
     return this.wallet.sendTransaction({ to: MEM_ADDR, data: call });
   }
-  // NOTE: recall reads this agent's checkpoint events and decrypts. Kept simple (newest 500 blocks of
-  // events for this agent); the browser SDK does full hash-chain verification — port that if you need
-  // tamper-proof reads. Returns entries flattened with a running seq.
+  // Checkpoint(uint256 indexed agentId, uint64 indexed era, uint64 seq, uint64 prevBlock,
+  //            bytes32 hash, bytes32 prevHash, bytes data) — agentId + era are indexed (topics).
+  // The encrypted payload is the trailing `data` bytes param in the event DATA, not the whole DATA.
+  // ⚠️ v0.1: write (append/encrypt) is complete and correct; READ decodes the `data` param but does
+  // NOT yet verify the prevBlock/hash chain. For tamper-proof reads, port decodeCheckpoint + the
+  // backwards hash-chain walk from the browser SDK (hero-foundry-web/lib/agent-memory.js recall()).
   async raw() { return (await this._all()).filter((e) => !(e.role === "agent" && e.text.startsWith(ROOT_MARK))); }
   async _all() {
-    const T = keccak256(toBytes("Checkpoint(uint256,uint256,uint256,bytes)")); // event sig (see contract)
-    const logs = await this.pub.getLogs({ address: MEM_ADDR, fromBlock: 0n, toBlock: "latest" }).catch(() => []);
+    const T = keccak256(toBytes("Checkpoint(uint256,uint64,uint64,uint64,bytes32,bytes32,bytes)"));
+    const agentTopic = "0x" + this.agentId.toString(16).padStart(64, "0");
+    const logs = await this.pub.request({ method: "eth_getLogs", params: [{ address: MEM_ADDR, topics: [T, agentTopic], fromBlock: "0x0", toBlock: "latest" }] }).catch(() => []);
     const out = [];
     let seq = 0;
     for (const l of logs) {
-      try { const entries = await this._open(Buffer.from((l.data || "0x").slice(2), "hex")); for (const e of entries) out.push({ ...e, seq: ++seq }); }
-      catch { /* not ours or sealed */ }
+      try {
+        // event DATA = seq(32) prevBlock(32) hash(32) prevHash(32) offset(32) len(32) bytes… ; the
+        // `data` bytes is the last dynamic param — read its length then that many bytes.
+        const hex = (l.data || "0x").slice(2);
+        const off = parseInt(hex.slice(4 * 64, 5 * 64), 16) * 2;      // offset to the bytes param
+        const len = parseInt(hex.slice(off, off + 64), 16) * 2;        // its byte length
+        const blob = Buffer.from(hex.slice(off + 64, off + 64 + len), "hex");
+        const entries = await this._open(blob);
+        for (const e of entries) out.push({ ...e, seq: ++seq });
+      } catch { /* not ours / sealed / decode gap */ }
     }
     return out;
   }

@@ -5,15 +5,21 @@
 import { compact } from "./compaction.mjs";
 
 export class Harness {
-  constructor({ provider, memory, tools = [], system = "", compactEvery = 24, maxSteps = 6, onEvent }) {
+  constructor({ provider, memory, tools = [], system = "", compactEvery = 24, maxSteps = 6, model = "auto", onEvent }) {
     this.provider = provider;
     this.memory = memory;
     this.tools = tools;                          // [{ def, run }]
     this.system = system;
     this.compactEvery = compactEvery;
     this.maxSteps = maxSteps;
+    // Routing mode is the primary cost knob: "auto" right-sizes each call (cheap models for easy
+    // steps, frontier only when the prompt needs it); "cheapest" forces the cheapest trusted model.
+    // Either way Hero Run prefers $0 free-served routes, so cost-per-task stays low without config.
+    this.model = model;
     this.onEvent = onEvent || (() => {});        // (type, data) for CLIs/UIs to observe
+    this._cost = 0;                              // $HERO charged, accumulated across the current task
   }
+  _charge(msg) { const c = Number(msg?.x_hero?.charged_hero || 0); if (c) { this._cost += c; this.onEvent("cost", { hero: c, model: msg.x_hero?.resolved_model, gateway: msg.x_hero?.gateway }); } }
 
   // Assemble constant-cost context: system + ROOT index + only the raw turns since the ROOT.
   async _context(userText) {
@@ -30,12 +36,14 @@ export class Harness {
     const messages = await this._context(userText);
     const toolDefs = this.tools.map((t) => t.def);
     const media = [];
+    this._cost = 0;
     for (let step = 0; step < this.maxSteps; step++) {
-      const msg = await this.provider.chat({ messages, tools: toolDefs.length ? toolDefs : null });
+      const msg = await this.provider.chat({ model: this.model, messages, tools: toolDefs.length ? toolDefs : null });
+      this._charge(msg);
       if (!msg.tool_calls?.length) {
         const text = (msg.content || "").trim();
         await this._remember(userText, text);
-        return { text, media };
+        return { text, media, costHero: this._cost };
       }
       messages.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
       for (const call of msg.tool_calls) {
@@ -47,10 +55,11 @@ export class Harness {
         messages.push({ role: "tool", tool_call_id: call.id, content: String(out).slice(0, 6000) });
       }
     }
-    const fin = await this.provider.chat({ messages, tools: null });
+    const fin = await this.provider.chat({ model: this.model, messages, tools: null });
+    this._charge(fin);
     const text = (fin.content || "").trim();
     await this._remember(userText, text);
-    return { text, media };
+    return { text, media, costHero: this._cost };
   }
 
   async _remember(userText, replyText) {

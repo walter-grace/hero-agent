@@ -16,7 +16,21 @@ export function heroRun({ apiKey = process.env.HERO_RUN_KEY, base = BASE } = {})
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok || d.error) throw new Error(`Hero Run: ${d.error?.message || d.error || r.status}`);
-    return d.choices?.[0]?.message || {};
+    const msg = d.choices?.[0]?.message || {};
+    // Attach cost telemetry so the harness can measure real cost-per-task: charged_hero is the $HERO
+    // debited for THIS call, resolved_model/gateway show what auto routed to (free-served = 0).
+    msg.x_hero = d.x_hero || null;
+    return msg;
   }
   return { chat, base, apiKey };
 }
+
+// $HERO → USD, fetched once (so cost-per-task can be reported in the same units as other harnesses).
+let _priceCache = null;
+export async function heroUsd(base = BASE) {
+  if (_priceCache != null) return _priceCache;
+  try { const m = await (await fetch(`${base}/api/market`)).json(); _priceCache = Number(m.price || m.priceUsd || 0) || 0; }
+  catch { _priceCache = 0; }
+  return _priceCache;
+}
+

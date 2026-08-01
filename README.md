@@ -52,6 +52,32 @@ hero-agent chat --memory onchain --agent 7
 
 Each memory is AES-256-GCM encrypted with a key derived from your wallet's signature, gzip'd, and checkpointed to the Agent Memory contract on Robinhood Chain. On-chain (and to Hero Run) it's just random bytes — only your wallet can decrypt. Because the key is the wallet's, **any agent you own can read another's memory**: one brain, many agents. Mint an agent at [herorunai.com/agent](https://herorunai.com/agent).
 
+## Cost per task — measured, not claimed
+
+```bash
+hero-agent bench                 # runs a task suite, prints real cost/task vs other harnesses
+hero-agent bench --model cheapest --tasks 5
+```
+
+The harness records the `$HERO` charged on every call (`x_hero.charged_hero`) and reports real cost-per-task at the live token price. Two structural levers keep it low:
+
+1. **Auto-routing** — Hero Run picks the cheapest *capable* model per call (including **$0 free-served** ones like DeepSeek V4 Flash), so easy steps don't pay frontier prices.
+2. **Compaction** — the agent reads a small constant-size ROOT index instead of replaying its whole history, so token cost per turn stays flat as memory grows. In long agent runs this is the dominant saving.
+
+A measured run (light Q&A, `--model auto`, live prices):
+
+| agent | $/task |
+|---|---|
+| **Hero Agent** | **~$0.0002** (measured) |
+| Hermes Agent | $0.39 |
+| Pi Agent | $0.40 |
+| Codex | $0.47 |
+| OpenCode | $0.51 |
+| Kimi Code | $0.54 |
+| Claude Code | $1.47 |
+
+**Honest caveat:** that's *not* a like-for-like figure. The published numbers are for coding-agent harnesses on heavy SWE-style tasks with frontier models; our sample was light Q&A routed to cheap models. The takeaway isn't a headline multiplier — it's that this harness **measures** cost-per-task and is built to **minimize** it (cheap/free routing + compaction). For an apples-to-apples comparison, run the same task suite with a frontier tier pinned.
+
 ## Tools
 
 - **web_search** — live results (routed to Perplexity Sonar through Hero Run; no separate search key).

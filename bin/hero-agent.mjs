@@ -44,6 +44,37 @@ async function main() {
   const agent = await createHeroAgent({ memory, mcpServers: mcpFromFlags(), onEvent });
   console.error(`hero-agent · brain: Hero Run (auto) · memory: ${memory.label()}\n`);
 
+  if (cmd === "bench") {
+    // Measure REAL cost-per-task and compare with published agent-harness numbers. Uses a fresh
+    // local memory per run so results are clean. Routing mode via --model auto|cheapest.
+    const { heroUsd } = await import("../src/provider.mjs");
+    const { createHeroAgent } = await import("../src/agent.mjs");
+    const TASKS = [
+      "What is 17 * 24? Reply with just the number.",
+      "List three primary colors, comma-separated.",
+      "In one sentence, what is a log-structured merge tree?",
+      "Summarize in one line why compaction lowers an agent's token cost.",
+      "Give one concrete tip for writing a good commit message.",
+    ];
+    const n = Math.min(Number(flag("tasks", TASKS.length)), TASKS.length);
+    const mode = flag("model", "auto");
+    const price = await heroUsd();
+    let totalHero = 0; let ran = 0;
+    console.error(`Running ${n} tasks · routing=${mode} · $HERO≈$${price.toExponential(2)}\n`);
+    for (let i = 0; i < n; i++) {
+      const fresh = new LocalMemory({ file: `/tmp/hero-agent-bench-${i}.jsonl` });
+      const a = await createHeroAgent({ memory: fresh });
+      a.model = mode;
+      try { const { costHero } = await a.run(TASKS[i]); totalHero += costHero; ran++; process.stderr.write(`  ${i + 1}. ${Math.round(costHero)} $HERO  ($${(costHero * price).toFixed(4)})  ${TASKS[i].slice(0, 42)}…\n`); }
+      catch (e) { process.stderr.write(`  ${i + 1}. skipped: ${e.message}\n`); }
+    }
+    const avgHero = ran ? totalHero / ran : 0; const avgUsd = avgHero * price;
+    console.log(`\n=== cost per task (avg over ${ran}) ===`);
+    const board = [["Hero Agent", avgUsd], ["Hermes Agent", 0.39], ["Pi Agent", 0.40], ["Codex", 0.47], ["OpenCode", 0.51], ["Kimi Code", 0.54], ["Claude Code", 1.47]];
+    board.sort((a, b) => a[1] - b[1]);
+    for (const [name, usd] of board) console.log(`  $${usd.toFixed(4).padStart(7)}  ${name === "Hero Agent" ? "▶ " : "  "}${name}`);
+    return;
+  }
   if (cmd === "recall") {
     const root = await memory.getRoot(); const raw = await memory.raw(); const since = await memory.sinceRoot();
     console.log(root?.text || "(no ROOT index yet)");
