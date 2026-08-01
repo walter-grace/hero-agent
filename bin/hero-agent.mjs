@@ -112,6 +112,38 @@ async function main() {
     console.log(`\npass rate: ${r.solved}/${r.total} (${Math.round(r.passRate * 100)}%) · avg cost/task: $${r.avgCostUsd.toFixed(4)}`);
     return;
   }
+  if (cmd === "smoke") {
+    // Cheapest end-to-end check: one trivial coding task, cheapest model, capped steps. Confirms the
+    // key, the agent loop, the shell tools, the sandbox, and scoring all work before a real run.
+    const { runCodingBench } = await import("../src/bench/run.mjs");
+    const { CODING_TASKS } = await import("../src/bench/tasks.mjs");
+    const { heroUsd } = await import("../src/provider.mjs");
+    const price = await heroUsd();
+    const task = CODING_TASKS.find((t) => t.id === "fix-bug") || CODING_TASKS[0];
+    console.error(`Smoke test: 1 task (${task.id}), model=cheapest, local sandbox\n`);
+    const r = await runCodingBench({ apiKey: process.env.HERO_RUN_KEY, tasks: [task], executor: "local", model: "cheapest", maxSteps: 8,
+      onEvent: (t, d) => { if (t === "task") process.stderr.write(`  ${d.solved ? "✓ solved" : "✗ not solved"} · ${Math.round(d.costHero)} $HERO ($${(d.costHero * price).toFixed(4)})${d.err ? " · " + d.err : ""}\n`); } });
+    console.log(r.solved ? "\n✓ smoke passed: the full loop works. Fund the key and run bench-code / terminal-bench / swe-bench." : "\n✗ smoke did not solve the task. Check the key balance and the error above.");
+    return;
+  }
+  if (cmd === "swe-bench") {
+    // Produce SWE-bench predictions (one patch per instance), then score with SWE-bench's own harness.
+    //   hero-agent swe-bench --dataset lite.jsonl [--instance django__django-11099] --out predictions.jsonl
+    const { runSweBench, loadSweBench } = await import("../src/bench/swe-bench.mjs");
+    const dataset = flag("dataset");
+    if (!dataset) { console.error("Provide --dataset <swe-bench lite .jsonl> (export it, see docs/benchmarks.md)"); process.exit(1); }
+    const { heroUsd } = await import("../src/provider.mjs");
+    const price = await heroUsd();
+    const instances = loadSweBench(dataset, { instance: flag("instance") });
+    const outPath = flag("out", "predictions.jsonl");
+    console.error(`SWE-bench: ${instances.length} instance(s) · model=${flag("model", "auto")} · out=${outPath}\n`);
+    const r = await runSweBench({ apiKey: process.env.HERO_RUN_KEY, instances, out: outPath, model: flag("model", "auto"),
+      onEvent: (t, d) => { if (t === "instance") process.stderr.write(`  ${d.produced ? "✓ patch" : "· no patch"}  ${d.instance_id.padEnd(30)} ${Math.round(d.costHero)} $HERO ($${(d.costHero * price).toFixed(4)})${d.err ? " · " + d.err : ""}\n`); } });
+    console.log(`\nwrote ${r.produced}/${r.total} patches to ${r.out}`);
+    console.log("score them with SWE-bench's harness:");
+    console.log(`  python -m swebench.harness.run_evaluation --predictions_path ${r.out} --dataset_name princeton-nlp/SWE-bench_Lite --run_id hero-agent`);
+    return;
+  }
   if (cmd === "recall") {
     const root = await memory.getRoot(); const raw = await memory.raw(); const since = await memory.sinceRoot();
     console.log(root?.text || "(no ROOT index yet)");

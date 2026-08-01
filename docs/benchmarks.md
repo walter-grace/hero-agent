@@ -43,4 +43,36 @@ Two knobs cover dataset variation, since the layout shifted between Terminal-Ben
 
 The adapter is built to the documented task format and validated on the parser and file-detection side. Confirm the two knobs against your checkout before trusting the pass rate, since a dataset can wire tests differently.
 
-SWE-bench (Verified or Lite) fits the same runner: load the task, run the agent against the repo checkout in a container, and use the task's test patch as the verify step.
+## Smoke test first
+
+Before any real run, confirm the whole chain works for a few $HERO:
+
+```bash
+hero-agent smoke
+```
+
+It runs one trivial coding task on the cheapest model in a local sandbox and scores it. A pass means the key, the agent loop, the shell tools, and the verifier all work. Then move to `bench-code`, `terminal-bench`, or `swe-bench` with a funded key.
+
+## SWE-bench Lite
+
+SWE-bench gives the agent a real GitHub issue on a real repo at a fixed commit; the agent must produce a patch that resolves it. hero-agent produces the patches; SWE-bench's own harness scores them (it applies the hidden test patch and runs the target tests in the official per-repo image). We do not reimplement that scoring.
+
+Export the dataset once, then run:
+
+```bash
+# 1. export SWE-bench Lite to JSONL (needs the `datasets` python package)
+python -c "from datasets import load_dataset; import json; \
+[print(json.dumps(dict(r))) for r in load_dataset('princeton-nlp/SWE-bench_Lite', split='test')]" > lite.jsonl
+
+# 2. produce patches (start with one instance to smoke-test the flow)
+hero-agent swe-bench --dataset lite.jsonl --instance django__django-11099 --out predictions.jsonl
+hero-agent swe-bench --dataset lite.jsonl --out predictions.jsonl        # the whole set
+
+# 3. score with SWE-bench's official harness
+python -m swebench.harness.run_evaluation \
+  --predictions_path predictions.jsonl \
+  --dataset_name princeton-nlp/SWE-bench_Lite \
+  --run_id hero-agent
+```
+
+For each instance the agent works in a fresh checkout of the repo at `base_commit` (fetched shallow, one commit), edits files, and its `git diff` becomes the patch in `predictions.jsonl` (the format the harness expects: `instance_id`, `model_name_or_path`, `model_patch`). Step 3 needs Docker and the `swebench` package. Instances the agent left unchanged are skipped, so the resolved rate is computed over what it actually attempted.

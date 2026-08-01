@@ -30,8 +30,11 @@ hero-agent run "research X and summarize"
 hero-agent remember "I prefer dark roasts"
 hero-agent recall                     # print the ROOT index + memory stats
 hero-agent compact                    # force a compaction now
+hero-agent smoke                      # cheap end-to-end check: one task, cheapest model
 hero-agent bench                      # measure cost per task on a light suite
 hero-agent bench-code                 # coding benchmark: solve tasks in a sandbox, score pass rate + cost
+hero-agent terminal-bench --dataset ./terminal-bench   # run against a Terminal-Bench checkout
+hero-agent swe-bench --dataset lite.jsonl              # produce SWE-bench Lite patches to score
 ```
 
 Flags: `--memory local|onchain` · `--file <path>` · `--agent <id>` · `--mcp "fs:npx -y @modelcontextprotocol/server-filesystem ."`
