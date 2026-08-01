@@ -1,0 +1,36 @@
+{
+  "name": "hero-agent",
+  "version": "0.1.0",
+  "description": "A personal AI agent with a wallet-owned, compacting memory. Brain = Hero Run (auto-routed inference). Memory syncs encrypted to Robinhood Chain. Built on hero-harness.",
+  "type": "module",
+  "bin": {
+    "hero-agent": "bin/hero-agent.mjs"
+  },
+  "exports": {
+    ".": "./src/agent.mjs",
+    "./harness": "./src/harness.mjs",
+    "./memory/local": "./src/memory/local.mjs",
+    "./memory/onchain": "./src/memory/onchain.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node bin/hero-agent.mjs chat"
+  },
+  "optionalDependencies": {
+    "viem": "^2.21.0"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "agent-harness",
+    "mcp",
+    "memory",
+    "compaction",
+    "hero-run",
+    "onchain",
+    "robinhood-chain"
+  ],
+  "license": "MIT"
+}
