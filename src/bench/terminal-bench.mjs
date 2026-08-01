@@ -17,8 +17,9 @@
 // Two knobs cover dataset variation (v1 vs v2/Harbor): --service (compose service name) and
 // --tests-path (where run-tests.sh expects the tests). Verify against your checkout before trusting
 // the numbers; this adapter is built to the documented format but the live wiring can differ per set.
-import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, existsSync, readFileSync, statSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Harness } from "../harness.mjs";
@@ -75,37 +76,54 @@ class TBExecutor {
   constructor(task, { service = "client", testsPath = "/app/tests" } = {}) {
     this.task = task; this.service = service; this.testsPath = testsPath;
     this.useCompose = !!task.compose;
-    this.cname = `hero-tb-${task.id}-${Math.floor(Date.now() % 1e9)}`;
+    this.cname = `hero-tb-${task.id}-${Math.floor(Date.now() % 1e9)}`.toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
     this.image = `hero-tb-${task.id}`.toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
+    // Terminal-Bench compose files interpolate T_BENCH_* vars that their own harness injects (image
+    // name, container name, test dir, log volume mounts). Provide them so `docker compose up` works
+    // standalone. Log paths point at throwaway host dirs; TEST_DIR is where run-tests.sh finds tests.
+    this.logDir = mkdtempSync(join(tmpdir(), "hero-tb-logs-"));
+    this.env = {
+      ...process.env,
+      T_BENCH_TASK_DOCKER_CLIENT_IMAGE_NAME: this.image,
+      T_BENCH_TASK_DOCKER_CLIENT_CONTAINER_NAME: `${this.cname}-${service}-1`,
+      T_BENCH_TEST_DIR: testsPath,
+      T_BENCH_TASK_LOGS_PATH: this.logDir, T_BENCH_CONTAINER_LOGS_PATH: "/logs",
+      T_BENCH_TASK_AGENT_LOGS_PATH: this.logDir, T_BENCH_CONTAINER_AGENT_LOGS_PATH: "/agent-logs",
+    };
   }
   async start() {
     if (this.useCompose) {
-      await pexec("docker", ["compose", "-p", this.cname, "-f", this.task.compose, "up", "-d", "--build"], { timeout: 600000 });
+      await pexec("docker", ["compose", "-p", this.cname, "-f", this.task.compose, "up", "-d", "--build"], { timeout: 900000, env: this.env });
     } else {
-      await pexec("docker", ["build", "-t", this.image, this.task.dir], { timeout: 600000 });
+      await pexec("docker", ["build", "-t", this.image, this.task.dir], { timeout: 900000 });
       await pexec("docker", ["run", "-d", "--name", this.cname, this.image, "sleep", "infinity"], { timeout: 60000 });
     }
   }
   _base() { return this.useCompose ? ["docker", ["compose", "-p", this.cname, "-f", this.task.compose, "exec", "-T", this.service]] : ["docker", ["exec", this.cname]]; }
-  async exec(cmd, { timeout = 60000 } = {}) {
+  async exec(cmd, { timeout = 120000 } = {}) {
     const [bin, pre] = this._base();
-    try { const { stdout, stderr } = await pexec(bin, [...pre, "sh", "-c", cmd], { timeout, maxBuffer: 8 << 20 }); return { code: 0, stdout, stderr }; }
+    try { const { stdout, stderr } = await pexec(bin, [...pre, "sh", "-c", cmd], { timeout, maxBuffer: 8 << 20, env: this.env }); return { code: 0, stdout, stderr }; }
     catch (e) { return { code: e.code ?? 1, stdout: e.stdout || "", stderr: e.stderr || String(e.message) }; }
   }
   async write(path, content) { const b64 = Buffer.from(content).toString("base64"); return this.exec(`mkdir -p "$(dirname '${path}')"; echo '${b64}' | base64 -d > '${path}'`); }
   async read(path) { const r = await this.exec(`cat '${path}'`); return r.code === 0 ? r.stdout : `read error: ${r.stderr}`; }
-  // Copy the tests in (agent never saw them) and run the task's own test script. Solved = exit 0.
+  // Score: copy the hidden tests to TEST_DIR (the agent never saw them), then run run-tests.sh, which
+  // does `pytest $TEST_DIR/...`. All tests passing (exit 0) = solved.
   async verify() {
     const target = this.useCompose ? `${this.cname}-${this.service}-1` : this.cname;
+    const parent = this.testsPath.replace(/\/[^/]+$/, "") || "/app";
     try {
-      if (this.task.testsDir) await pexec("docker", ["cp", join(this.task.dir, "tests"), `${target}:${this.testsPath.replace(/\/tests$/, "")}/tests`], { timeout: 60000 }).catch(() => {});
-      if (this.task.runTests) await pexec("docker", ["cp", join(this.task.dir, "run-tests.sh"), `${target}:/run-tests.sh`], { timeout: 60000 });
+      await this.exec(`mkdir -p '${parent}'`);
+      if (this.task.testsDir) await pexec("docker", ["cp", join(this.task.dir, "tests") + "/.", `${target}:${this.testsPath}`], { timeout: 120000, env: this.env }).catch(() => {});
+      if (this.task.runTests) await pexec("docker", ["cp", join(this.task.dir, "run-tests.sh"), `${target}:/run-tests.sh`], { timeout: 60000, env: this.env });
     } catch {}
-    const r = await this.exec(this.task.runTests ? "sh /run-tests.sh" : `python3 -m pytest -q ${this.testsPath}`, { timeout: 300000 });
+    const r = await this.exec(this.task.runTests ? `TEST_DIR='${this.testsPath}' bash /run-tests.sh` : `python3 -m pytest -q ${this.testsPath}`, { timeout: 600000 });
+    // pytest exits 0 only when all tests pass.
     return r.code === 0;
   }
   async cleanup() {
-    try { if (this.useCompose) await pexec("docker", ["compose", "-p", this.cname, "-f", this.task.compose, "down", "-v"], { timeout: 120000 }); else await pexec("docker", ["rm", "-f", this.cname], { timeout: 60000 }); } catch {}
+    try { if (this.useCompose) await pexec("docker", ["compose", "-p", this.cname, "-f", this.task.compose, "down", "-v"], { timeout: 120000, env: this.env }); else await pexec("docker", ["rm", "-f", this.cname], { timeout: 60000 }); } catch {}
+    try { rmSync(this.logDir, { recursive: true, force: true }); } catch {}
   }
 }
 

@@ -27,21 +27,21 @@ The built-in suite is for quick local validation. For the published agent-harnes
 
 ```bash
 git clone https://github.com/laude-institute/terminal-bench
-export HERO_RUN_KEY=hr_live_...          # funded; a full run is many frontier calls
-export DOCKER_HOST=...                    # Docker daemon must be running
+# the Docker daemon must be running; a full run is many frontier calls, so fund the key
+export HERO_RUN_KEY=hr_live_...
 
-hero-agent terminal-bench --dataset ./terminal-bench --task hello-world   # one task
-hero-agent terminal-bench --dataset ./terminal-bench                       # the whole set
+hero-agent terminal-bench --dataset ./terminal-bench/original-tasks --task broken-python   # one task
+hero-agent terminal-bench --dataset ./terminal-bench/original-tasks                          # the whole set
 ```
 
-For each task the adapter reads `task.yaml` for the instruction, builds the task's own container (Dockerfile or `docker-compose.yaml`), lets the agent drive it through the shell tools, then copies in `tests/` and runs `run-tests.sh`. All tests passing counts as solved. It reports pass rate and cost per task.
+For each task the adapter reads `task.yaml` for the instruction, brings up the task's container from its `docker-compose.yaml` (injecting the `T_BENCH_*` variables the compose file expects: image name, container name, `TEST_DIR`, log volumes), lets the agent drive it through the shell tools, then copies the hidden `tests/` into `TEST_DIR` and runs `run-tests.sh` (`pytest $TEST_DIR/...`). All tests passing (pytest exit 0) counts as solved. It reports pass rate and cost per task.
 
-Two knobs cover dataset variation, since the layout shifted between Terminal-Bench 1.x and 2.0 (Harbor):
+Two knobs cover dataset variation between Terminal-Bench versions:
 
-- `--service <name>`: the compose service the agent works in (default `client`).
+- `--service <name>`: the compose service the agent works in (default `client`, confirmed against the current dataset).
 - `--tests-path <path>`: where `run-tests.sh` expects the tests (default `/app/tests`).
 
-The adapter is built to the documented task format and validated on the parser and file-detection side. Confirm the two knobs against your checkout before trusting the pass rate, since a dataset can wire tests differently.
+Validated against the real dataset on the parsing and wiring side (task format, compose service, env-var contract, `run-tests.sh` behavior). The container build + agent + scoring loop needs a running Docker daemon; run one task first to confirm the image pulls and the tests wire up on your version.
 
 ## Smoke test first
 
