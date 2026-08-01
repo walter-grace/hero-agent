@@ -75,4 +75,30 @@ python -m swebench.harness.run_evaluation \
   --run_id hero-agent
 ```
 
-For each instance the agent works in a fresh checkout of the repo at `base_commit` (fetched shallow, one commit), edits files, and its `git diff` becomes the patch in `predictions.jsonl` (the format the harness expects: `instance_id`, `model_name_or_path`, `model_patch`). Step 3 needs Docker and the `swebench` package. Instances the agent left unchanged are skipped, so the resolved rate is computed over what it actually attempted.
+For each instance the agent works in a fresh checkout of the repo at `base_commit` (fetched shallow, one commit), edits files, and its `git diff` becomes the patch in `predictions.jsonl` (the format the harness expects: `instance_id`, `model_name_or_path`, `model_patch`). Instances the agent left unchanged are skipped, so the resolved rate is computed over what it actually attempted.
+
+Use `--model auto` for real patch quality; the cheapest model rarely solves a real issue. `--steps N` caps the agent's turns (and cost) per instance.
+
+### Docker-free SWE-bench
+
+The solve step above needs **no Docker** — just git and a key. Only scoring needs a Linux/Docker environment, and you can skip that locally two ways:
+
+- **Get the dataset without Python** — pull instances over HTTP from the Hugging Face datasets-server instead of the `datasets` package:
+  ```bash
+  curl -s "https://datasets-server.huggingface.co/rows?dataset=princeton-nlp/SWE-bench_Lite&config=default&split=test&offset=0&length=100" \
+    | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>JSON.parse(d).rows.forEach(r=>console.log(JSON.stringify(r.row))))' > lite.jsonl
+  ```
+- **Score in the cloud** — submit `predictions.jsonl` to SWE-bench's hosted evaluation with [`sb-cli`](https://github.com/swe-bench/sb-cli) instead of running the local Docker harness:
+  ```bash
+  sb-cli submit swe-bench_lite test --predictions_path predictions.jsonl
+  ```
+
+So the whole loop can run without a local container runtime: fetch over HTTP, solve locally, score in the cloud.
+
+## Alternatives to Docker
+
+The benchmarks differ in what isolation they need:
+
+- **bench-code** and **SWE-bench solve** run in a local temp dir — no container runtime at all.
+- **SWE-bench scoring** runs in SWE-bench's cloud via `sb-cli`, so no local Docker.
+- **Terminal-Bench** genuinely needs a container runtime, because each task *is* a container image. If Docker Desktop is too heavy, [colima](https://github.com/abiosoft/colima) provides the same `docker` CLI from a lighter Lima VM and works with this adapter unchanged (`brew install colima && colima start`). Podman works too. Budget a few GB of disk for the VM and task images either way.

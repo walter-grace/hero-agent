@@ -137,7 +137,7 @@ async function main() {
     const instances = loadSweBench(dataset, { instance: flag("instance") });
     const outPath = flag("out", "predictions.jsonl");
     console.error(`SWE-bench: ${instances.length} instance(s) · model=${flag("model", "auto")} · out=${outPath}\n`);
-    const r = await runSweBench({ apiKey: process.env.HERO_RUN_KEY, instances, out: outPath, model: flag("model", "auto"),
+    const r = await runSweBench({ apiKey: process.env.HERO_RUN_KEY, instances, out: outPath, model: flag("model", "auto"), maxSteps: Number(flag("steps", 40)),
       onEvent: (t, d) => { if (t === "instance") process.stderr.write(`  ${d.produced ? "✓ patch" : "· no patch"}  ${d.instance_id.padEnd(30)} ${Math.round(d.costHero)} $HERO ($${(d.costHero * price).toFixed(4)})${d.err ? " · " + d.err : ""}\n`); } });
     console.log(`\nwrote ${r.produced}/${r.total} patches to ${r.out}`);
     console.log("score them with SWE-bench's harness:");
