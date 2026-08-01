@@ -21,9 +21,13 @@ import { LocalExecutor } from "./executor.mjs";
 const MODEL_NAME = "hero-agent";
 const SYSTEM =
   "You are a software engineer fixing a real bug in an existing repository. You are at the repo root " +
-  "on the exact commit the issue was filed against. Read the relevant code with the shell and " +
-  "read_file, make the minimal change that resolves the issue, and use write_file to edit files. Do " +
-  "not write new tests. Do not run git. When the fix is complete, stop.";
+  "on the exact commit the issue was filed against. Work in this order: (1) use the shell (grep, ls, " +
+  "cat) and read_file to find the exact file and lines responsible; (2) use write_file to make the " +
+  "minimal change that resolves the issue in the SOURCE files (do not create helper or config files " +
+  "like sitecustomize.py, and do not add tests); (3) confirm your edit is in place by reading the " +
+  "file back. You MUST actually modify at least one existing source file with write_file. Do not " +
+  "finish, and do not just describe the fix, until you have edited the source and verified it. Do not " +
+  "run git.";
 
 // Load instances from a local JSONL or JSON array (export the HF dataset once, see docs/benchmarks.md).
 export function loadSweBench(path, { instance } = {}) {
