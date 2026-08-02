@@ -19,6 +19,7 @@
     "start": "node bin/hero-agent.mjs chat"
   },
   "optionalDependencies": {
+    "e2b": "^2.37.0",
     "viem": "^2.21.0",
     "yaml": "^2.5.0"
   },

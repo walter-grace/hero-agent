@@ -5,7 +5,9 @@
 //   hero-agent remember "fact"      write a memory without a chat turn
 //   hero-agent recall               print the ROOT index + memory stats
 //   hero-agent compact              force a compaction now
+//   hero-agent prove "<statement>"  prove a theorem in Lean 4 in an E2B sandbox (loops until it verifies)
 // Flags: --memory local|onchain  --file <path>  --agent <id>  --mcp <name:command>
+//        prove: --full-mathlib  --timeout <seconds>  --model auto|cheapest  (needs E2B_API_KEY, ARISTOTLE_API_KEY)
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -147,6 +149,34 @@ async function main() {
     console.log(`\nwrote ${r.produced}/${r.total} patches to ${r.out}`);
     console.log("score them with SWE-bench's harness:");
     console.log(`  python -m swebench.harness.run_evaluation --predictions_path ${r.out} --dataset_name princeton-nlp/SWE-bench_Lite --run_id hero-agent`);
+    return;
+  }
+  if (cmd === "prove") {
+    // Prove a theorem in Lean 4 inside an E2B sandbox: draft Lean (or call Aristotle), compile in the
+    // sandbox, read errors, iterate until the build is clean with no sorry. Needs E2B_API_KEY (and
+    // ARISTOTLE_API_KEY to use the aristotle tool). Mathlib is skipped unless --full-mathlib.
+    //   hero-agent prove "the sum of two even integers is even" [--full-mathlib] [--timeout 1200] [--model auto]
+    if (!process.env.E2B_API_KEY) { console.error("Set E2B_API_KEY (get one at https://e2b.dev/dashboard)."); process.exit(1); }
+    const statement = rest.join(" ");
+    if (!statement.trim()) { console.error('Provide a statement: hero-agent prove "<statement>"'); process.exit(1); }
+    const { runProve } = await import("../src/prove.mjs");
+    const { heroUsd } = await import("../src/provider.mjs");
+    const price = await heroUsd().catch(() => 0);
+    const fullMathlib = argv.includes("--full-mathlib");
+    const timeoutMs = Number(flag("timeout", 1200)) * 1000; // seconds -> ms
+    console.error(`Prove · sandbox=E2B · Mathlib=${fullMathlib ? "on (heavy)" : "off"} · model=${flag("model", "auto")}\n`);
+    const r = await runProve(statement, {
+      apiKey: process.env.HERO_RUN_KEY, model: flag("model", "auto"), fullMathlib, timeoutMs,
+      onEvent: (t, d) => {
+        if (t === "phase") process.stderr.write(`  · ${d.message}\n`);
+        if (t === "lean") process.stderr.write(`    ${String(d.message).split("\n")[0].slice(0, 100)}\n`);
+        if (t === "tool") process.stderr.write(`    → ${d.name}(${JSON.stringify(d.args).slice(0, 80)})\n`);
+      },
+    });
+    console.log(r.verified ? "\n✓ VERIFIED: Lean accepted the proof (clean build, no sorry).\n" : "\n✗ NOT verified. The build did not pass clean. Latest build output:\n" + (r.buildOutput || r.err || "") + "\n");
+    if (r.finalLean) { console.log("--- Proof.lean ---\n" + r.finalLean + "\n------------------"); }
+    console.log(`\ncost: ${Math.round(r.costHero)} $HERO ($${(r.costHero * price).toFixed(4)})`);
+    console.log("trace: " + r.trace.join(" → "));
     return;
   }
   if (cmd === "recall") {

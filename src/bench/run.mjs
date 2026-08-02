@@ -6,6 +6,7 @@ import { Harness } from "../harness.mjs";
 import { heroRun, heroUsd } from "../provider.mjs";
 import { shellTools } from "../tools/shell.mjs";
 import { LocalExecutor, DockerExecutor } from "./executor.mjs";
+import { E2BExecutor } from "./e2b-executor.mjs";
 
 const CODING_SYSTEM =
   "You are a coding agent working in a sandbox. Use the shell, write_file, and read_file tools to " +
@@ -20,7 +21,9 @@ export async function runCodingBench({ apiKey, tasks, executor = "local", image,
   const price = await heroUsd();
   const results = [];
   for (const task of tasks) {
-    const ex = executor === "docker" ? new DockerExecutor({ image }) : new LocalExecutor();
+    const ex = executor === "docker" ? new DockerExecutor({ image })
+      : executor === "e2b" ? new E2BExecutor()
+      : new LocalExecutor();
     let solved = false, costHero = 0, err = null;
     try {
       await task.setup?.(ex);

@@ -83,10 +83,24 @@ hero-agent bench-code --executor docker   # one container per task (real isolati
 
 The agent gets `shell`, `write_file`, and `read_file` tools inside a fresh sandbox per task. For the published comparison, run against [Terminal-Bench](https://www.tbench.ai) or SWE-bench with the Docker executor. See [docs/benchmarks.md](docs/benchmarks.md).
 
+## Theorem proving
+
+`prove` turns the same harness into a Lean 4 theorem prover. The agent runs in an [E2B](https://e2b.dev) cloud sandbox, drafts Lean 4 (or calls the Harmonic Aristotle prover), compiles it inside the sandbox, reads the compiler errors, and loops until Lean verifies clean with no `sorry`. The toolchain, proof files, and every compile stay in the sandbox; only the final `.lean` and a short trace come back.
+
+```bash
+export E2B_API_KEY=e2b_...          # get one at https://e2b.dev/dashboard
+export ARISTOTLE_API_KEY=arstl_...  # optional: enables the aristotle_prove tool
+hero-agent prove "the sum of two even integers is even"
+hero-agent prove "..." --full-mathlib --timeout 1800   # fetch the Mathlib cache (slow, heavier proofs)
+```
+
+Success is objective: a clean `lake build` with zero errors and zero `sorry`. Lean installs at runtime by default (elan + a pinned toolchain, Lean `v4.15.0`); Mathlib is skipped unless you pass `--full-mathlib` because its build cache is large and slow. For faster repeated runs, build the prebuilt template in [templates/lean](templates/lean) and point at it with `E2B_TEMPLATE`. The sandbox uses the same `E2BExecutor` (`src/bench/e2b-executor.mjs`), which implements the same executor contract as the local and Docker backends, so `bench-code` can run against E2B too.
+
 ## Tools
 
 - **web_search**: live results, routed to Perplexity Sonar through Hero Run. No separate search key.
 - **hero_generate**: an image or an audio clip from a prompt.
+- **aristotle_prove**: formalize a statement or fill `sorry`s into verified Lean 4 via Harmonic's Aristotle prover (used by `prove`).
 - **MCP**: point it at any [MCP](https://modelcontextprotocol.io) stdio server and its tools become the agent's tools.
 
 ## Use it as a library
