@@ -18,11 +18,15 @@ export class E2BExecutor {
   // timeoutMs: sandbox lifetime. Proofs run for minutes, so default generous (20 min) and allow
   //   override. Hobby E2B caps a sandbox at 1h; Pro at 24h. cmdTimeoutMs bounds a single command
   //   (Lean/Mathlib steps are slow, so this is large by default).
-  constructor({ apiKey = process.env.E2B_API_KEY, template = process.env.E2B_TEMPLATE, timeoutMs = 20 * 60_000, cmdTimeoutMs = 15 * 60_000 } = {}) {
+  // allowInternetAccess: leave undefined to keep the E2B default (internet on). Pass false to
+  //   create a sandbox with NO egress (E2B treats this as denyOut 0.0.0.0/0). The replay
+  //   harness uses false so untrusted training code cannot phone home or fetch a fake score.
+  constructor({ apiKey = process.env.E2B_API_KEY, template = process.env.E2B_TEMPLATE, timeoutMs = 20 * 60_000, cmdTimeoutMs = 15 * 60_000, allowInternetAccess } = {}) {
     this.apiKey = apiKey;
     this.template = template;                 // optional prebuilt template (e.g. Lean pre-cached)
     this.timeoutMs = timeoutMs;
     this.cmdTimeoutMs = cmdTimeoutMs;
+    this.allowInternetAccess = allowInternetAccess;
     this.sbx = null;
   }
 
@@ -33,6 +37,7 @@ export class E2BExecutor {
     try { ({ Sandbox } = await import("e2b")); }
     catch { throw new Error("E2BExecutor: the 'e2b' package is not installed. Run: npm install e2b"); }
     const opts = { apiKey: this.apiKey, timeoutMs: this.timeoutMs };
+    if (this.allowInternetAccess !== undefined) opts.allowInternetAccess = this.allowInternetAccess;
     // Sandbox.create(template?, opts): pass the template name only when one is configured.
     this.sbx = this.template ? await Sandbox.create(this.template, opts) : await Sandbox.create(opts);
   }

@@ -6,6 +6,7 @@
 //   hero-agent recall               print the ROOT index + memory stats
 //   hero-agent compact              force a compaction now
 //   hero-agent prove "<statement>"  prove a theorem in Lean 4 in an E2B sandbox (loops until it verifies)
+//   hero-agent replay <path-to-diff> replay a contributed train.py diff in a sandbox, measure val_bpb, verdict
 // Flags: --memory local|onchain  --file <path>  --agent <id>  --mcp <name:command>
 //        prove: --full-mathlib  --timeout <seconds>  --model auto|cheapest  (needs E2B_API_KEY, ARISTOTLE_API_KEY)
 import { homedir } from "node:os";
@@ -40,7 +41,50 @@ const onEvent = (type, data) => {
   if (type === "compact") process.stderr.write(`  · compacting ${data.entries} memories → ROOT\n`);
 };
 
+// Commands that never call the Hero Run brain (they run entirely in a sandbox) do not need a
+// HERO_RUN_KEY. replay is the val_bpb oracle: it only needs E2B_API_KEY.
+const NO_BRAIN = new Set(["replay"]);
+
 async function main() {
+  if (NO_BRAIN.has(cmd)) {
+    if (cmd === "replay") {
+      if (!process.env.E2B_API_KEY) { console.error("Set E2B_API_KEY (get one at https://e2b.dev/dashboard)."); process.exit(1); }
+      const path = rest[0];
+      if (!path) { console.error("Provide a path: hero-agent replay <path-to-diff-or-train.py>"); process.exit(1); }
+      const { readFileSync } = await import("node:fs");
+      let artifact;
+      try { artifact = readFileSync(path, "utf8"); } catch (e) { console.error(`cannot read ${path}: ${e.message}`); process.exit(1); }
+      const { runReplay } = await import("../src/replay.mjs");
+      const seedsN = Number(flag("seeds", 3));
+      const steps = flag("steps") ? Number(flag("steps")) : null;
+      const timeoutMs = Number(flag("timeout", 900)) * 1000;
+      console.error(`Replay · sandbox=E2B (egress OFF) · mode=cpu-tiny · seeds=${seedsN}${steps ? " · steps=" + steps : ""}\n`);
+      const r = await runReplay(artifact, {
+        seeds: seedsN, steps, timeoutMs,
+        onEvent: (t, d) => {
+          if (t === "phase") process.stderr.write(`  · ${d.message}\n`);
+          if (t === "seed") process.stderr.write(`    ${d.role.padEnd(9)} seed ${d.seed}: val_bpb=${d.bpb.toFixed(5)}\n`);
+        },
+      });
+      console.log("");
+      if (r.verdict === "tampered") {
+        console.log(`✗ TAMPERED (${r.tamper.where}): ${r.tamper.reasons.join("; ")}`);
+        console.log("The artifact tried to fake or corrupt its own score. No bpb number is trusted.");
+      } else if (r.verdict === "error") {
+        console.log(`! ERROR: ${r.err}`);
+      } else {
+        const sym = r.verdict === "improved" ? "✓" : r.verdict === "regressed" ? "✗" : "•";
+        console.log(`${sym} VERDICT: ${r.verdict}`);
+        console.log(`  baseline val_bpb: ${r.baselineBpb.toFixed(5)}  [${r.baselineBpbs.map((x) => x.toFixed(5)).join(", ")}]`);
+        console.log(`  candidate val_bpb: ${r.candidateBpb.toFixed(5)}  [${r.candidateBpbs.map((x) => x.toFixed(5)).join(", ")}]`);
+        console.log(`  delta: ${r.delta.toFixed(5)} bpb (lower is better)   noise band (2σ): ${r.noiseBand.toFixed(5)}`);
+        console.log(`  network egress blocked: ${r.networkBlocked === null ? "unknown" : r.networkBlocked}`);
+      }
+      console.log(`  seeds: ${r.seeds.join(", ")}`);
+      console.log(`  pinned hashes: ${Object.entries(r.hashes).map(([k, v]) => `${k}=${v.slice(0, 10)}`).join("  ")}`);
+    }
+    return;
+  }
   if (!process.env.HERO_RUN_KEY) { console.error("Set HERO_RUN_KEY (mint at https://herorunai.com/keys)."); process.exit(1); }
   const memory = await makeMemory();
   const agent = await createHeroAgent({ memory, mcpServers: mcpFromFlags(), onEvent });

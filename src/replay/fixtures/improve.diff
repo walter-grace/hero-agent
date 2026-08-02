@@ -1,0 +1,13 @@
+--- a/train.py
++++ b/train.py
+@@ -25,7 +25,9 @@
+ WD    = float(os.environ.get("HERO_WD",  cfg.get("wd", 0.0)))
+ random.seed(SEED)
+ 
+-# EDIT-ME: baseline training procedure below.
++# EDIT-ME: research diff -- train longer and a bit hotter to converge further.
++STEPS = STEPS * 5
++LR = max(LR, 0.8)
+ 
+ vocab = _readj("data/vocab.json")
+ stoi = {c: i for i, c in enumerate(vocab)}

@@ -1,0 +1,11 @@
+--- a/train.py
++++ b/train.py
+@@ -25,7 +25,7 @@
+ WD    = float(os.environ.get("HERO_WD",  cfg.get("wd", 0.0)))
+ random.seed(SEED)
+ 
+-# EDIT-ME: baseline training procedure below.
++# EDIT-ME: no-op tweak (a comment change; training is byte-for-byte identical).
+ 
+ vocab = _readj("data/vocab.json")
+ stoi = {c: i for i, c in enumerate(vocab)}
