@@ -2,6 +2,31 @@
 // search, github, your own) and its tools become the agent's tools: picoclaw/Hermes extensibility.
 // Config shape: [{ name, command, args?, env? }]. Returns tools in the harness's { def, run } shape.
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
+import { join, delimiter } from "node:path";
+
+// Resolve the fff-mcp binary (github.com/dmtrKovalenko/fff, MIT): a prebuilt file-search MCP server.
+// fff is OPTIONAL and never a dependency of hero-agent, so this returns null when it is not installed
+// and callers degrade gracefully. Honors FFF_MCP_BIN, then common install dirs, then PATH.
+export function resolveFffBin() {
+  const name = process.platform === "win32" ? "fff-mcp.exe" : "fff-mcp";
+  const isFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
+  const override = process.env.FFF_MCP_BIN;
+  if (override) return isFile(override) ? override : null;
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  const candidates = [];
+  if (home) candidates.push(join(home, ".local", "bin", name));   // one-line installer
+  candidates.push(join("/opt/homebrew/bin", name), join("/usr/local/bin", name), join("/usr/bin", name)); // homebrew / manual
+  for (const dir of (process.env.PATH || "").split(delimiter)) if (dir) candidates.push(join(dir, name));
+  for (const c of candidates) if (isFile(c)) return c;
+  return null;
+}
+
+// MCP server config for fff, or null if fff-mcp is not on this machine. Enable with `--fff`.
+export function fffServer() {
+  const bin = resolveFffBin();
+  return bin ? { name: "fff", command: bin, args: [] } : null;
+}
 
 function connect({ command, args = [], env = {} }) {
   const proc = spawn(command, args, { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "inherit"] });

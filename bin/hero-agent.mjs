@@ -7,13 +7,14 @@
 //   hero-agent compact              force a compaction now
 //   hero-agent prove "<statement>"  prove a theorem in Lean 4 in an E2B sandbox (loops until it verifies)
 //   hero-agent replay <path-to-diff> replay a contributed train.py diff in a sandbox, measure val_bpb, verdict
-// Flags: --memory local|onchain  --file <path>  --agent <id>  --mcp <name:command>
+// Flags: --memory local|onchain  --file <path>  --agent <id>  --mcp <name:command>  --fff (fast file search)
 //        prove: --full-mathlib  --timeout <seconds>  --model auto|cheapest  (needs E2B_API_KEY, ARISTOTLE_API_KEY)
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { createHeroAgent } from "../src/agent.mjs";
 import { LocalMemory } from "../src/memory/local.mjs";
+import { fffServer } from "../src/tools/mcp.mjs";
 
 const argv = process.argv.slice(2);
 const cmd = argv[0] || "chat";
@@ -29,11 +30,20 @@ async function makeMemory() {
   return new LocalMemory({ file: flag("file", join(homedir(), ".hero-agent", "memory", "default.jsonl")) });
 }
 function mcpFromFlags() {
+  const servers = [];
   const spec = flag("mcp");           // e.g. --mcp "fs:npx -y @modelcontextprotocol/server-filesystem ."
-  if (!spec) return [];
-  const [name, ...cmd] = spec.replace(/^[^:]+:/, (m) => m).split(":");
-  const parts = spec.split(":"); const nm = parts.shift(); const c = parts.join(":").trim().split(/\s+/);
-  return [{ name: nm, command: c[0], args: c.slice(1) }];
+  if (spec) {
+    const parts = spec.split(":"); const nm = parts.shift(); const c = parts.join(":").trim().split(/\s+/);
+    servers.push({ name: nm, command: c[0], args: c.slice(1) });
+  }
+  // --fff: attach fff's fast file-search MCP server (github.com/dmtrKovalenko/fff). Optional and never a
+  // dependency: if fff-mcp is not installed we print how to get it and keep running without it.
+  if (argv.includes("--fff")) {
+    const s = fffServer();
+    if (s) { console.error(`  · fast file search on (fff-mcp: ${s.command})`); servers.push(s); }
+    else console.error("  · --fff requested but fff-mcp not found. Install: curl -L https://dmtrkovalenko.dev/install-fff-mcp.sh | bash  (or brew install dmtrKovalenko/fff/fff-mcp). Continuing without file search.");
+  }
+  return servers;
 }
 
 const onEvent = (type, data) => {
