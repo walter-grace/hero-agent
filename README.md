@@ -57,6 +57,8 @@ hero-agent chat --memory onchain --agent 7
 
 Each memory gets AES-256-GCM encrypted with a key derived from your wallet's signature, gzip'd, and checkpointed to the Agent Memory contract on Robinhood Chain. On-chain, and to Hero Run, it reads as random bytes. Only your wallet decrypts it. Because the key comes from the wallet rather than the agent, any agent you own can read another's memory: one brain across many agents. Mint an agent at [herorunai.com/agent](https://herorunai.com/agent).
 
+**Interoperable across surfaces.** This backend shares the exact contract, key derivation, and blob format (byte 0 marker: 0 plaintext, 1 passphrase, 2 wallet-derived; then IV, then ciphertext) with the web app at herorunai.com/agent and the hosted MCP server. So memory written here is readable there, and by any MCP agent (Claude Code, Codex, Cursor) holding the same wallet, from one key. Write a memory in the CLI overnight, recall it on the website in the morning, or hand it to Claude Code.
+
 ## Cost per task
 
 hero-agent instruments its own cost. Every model call records the $HERO charged (`x_hero.charged_hero`), and `bench` reports cost per task at the live token price, so you can compare configurations and track cost as you change the setup.

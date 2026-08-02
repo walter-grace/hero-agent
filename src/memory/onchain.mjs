@@ -39,17 +39,23 @@ export class OnchainMemory {
     this._key = await webcrypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
     return this._key;
   }
+  // Canonical blob format shared with the web SDK and the hosted MCP server, so memory written on
+  // any surface is readable on every other one from the same wallet: byte 0 = marker
+  // (0 = plaintext gzip, 1 = passphrase/PBKDF2, 2 = wallet-derived AES-GCM), then IV[12], then
+  // ciphertext. We write 2 (wallet-derived); using 1 here would collide with the passphrase marker
+  // and make this agent's memory unreadable on herorunai.com and in Claude Code via MCP.
   async _seal(entries) {
     const { webcrypto } = await import("node:crypto");
     const key = await this._cryptoKey();
     const iv = webcrypto.getRandomValues(new Uint8Array(12));
     const gz = gzipSync(Buffer.from(JSON.stringify(entries)));
     const ct = new Uint8Array(await webcrypto.subtle.encrypt({ name: "AES-GCM", iv }, key, gz));
-    return Buffer.concat([Buffer.from([1]), Buffer.from(iv), Buffer.from(ct)]); // 1 = AES-GCM marker
+    return Buffer.concat([Buffer.from([2]), Buffer.from(iv), Buffer.from(ct)]); // 2 = wallet-derived AES-GCM
   }
   async _open(blob) {
     const { webcrypto } = await import("node:crypto");
-    if (blob[0] !== 1) throw new Error("sealed"); // not ours / unknown marker
+    if (blob[0] === 0) return JSON.parse(gunzipSync(Buffer.from(blob.subarray(1))).toString()); // plaintext gzip
+    if (blob[0] !== 2) throw new Error("sealed"); // passphrase-encrypted (1) or unknown marker
     const key = await this._cryptoKey();
     const pt = await webcrypto.subtle.decrypt({ name: "AES-GCM", iv: blob.subarray(1, 13) }, key, blob.subarray(13));
     return JSON.parse(gunzipSync(Buffer.from(pt)).toString());
