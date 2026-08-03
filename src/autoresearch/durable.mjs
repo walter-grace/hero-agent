@@ -12,10 +12,15 @@
 const STEP_MARK = "ar-step::"; // marks a step record; role:"system" keeps it out of conversational recall
 
 export class DurableRun {
-  constructor({ memory, runId, onLog = () => {} }) {
+  // onLog(msg)      : human-readable progress line (stderr)
+  // onEvent(record) : one structured observability record per step lifecycle event, so a run can be
+  //                   piped to a queryable JSONL log (mirrors Vercel AI Gateway logs: status + ms +
+  //                   timestamps per unit of work). Fields: {event, runId, step, status, ms, at, ...}.
+  constructor({ memory, runId, onLog = () => {}, onEvent = () => {} }) {
     this.memory = memory;
     this.runId = String(runId);
     this.onLog = onLog;
+    this.onEvent = onEvent;
     this.done = new Map(); // step name -> result, rebuilt from the log on load()
   }
 
@@ -37,12 +42,33 @@ export class DurableRun {
   // without re-running. Otherwise run it, checkpoint the result, and return it. The result must be
   // JSON-serializable and small — it goes into an on-chain checkpoint.
   async step(name, fn) {
-    if (this.done.has(name)) { this.onLog(`step ${name}: cached — resumed from the durable log`); return this.done.get(name); }
+    if (this.done.has(name)) {
+      this.onLog(`step ${name}: cached — resumed from the durable log`);
+      this.onEvent({ event: "step", runId: this.runId, step: name, status: "cached", ms: 0, at: new Date().toISOString() });
+      return this.done.get(name);
+    }
     this.onLog(`step ${name}: running`);
-    const result = await fn();
-    await this.memory.append([{ role: "system", text: STEP_MARK + JSON.stringify({ runId: this.runId, step: name, result, at: new Date().toISOString() }) }]);
+    const startedAt = new Date().toISOString();
+    const t0 = Date.now();
+    let result;
+    try {
+      result = await fn();
+    } catch (e) {
+      // Not checkpointed: an errored step re-runs on the next resume. Emit an observability record so
+      // the failure is visible/queryable, then propagate.
+      const ms = Date.now() - t0;
+      this.onLog(`step ${name}: error after ${ms}ms — ${e.message}`);
+      this.onEvent({ event: "step", runId: this.runId, step: name, status: "error", ms, at: startedAt, error: e.message });
+      throw e;
+    }
+    const ms = Date.now() - t0;
+    // The step record now carries observability fields (status, ms, timestamps) alongside the result,
+    // so the on-chain / local log doubles as a queryable run log. Resume only reads runId/step/result,
+    // so the extra fields are backward-compatible.
+    await this.memory.append([{ role: "system", text: STEP_MARK + JSON.stringify({ runId: this.runId, step: name, status: "done", ms, startedAt, at: new Date().toISOString(), result }) }]);
     this.done.set(name, result);
-    this.onLog(`step ${name}: done — checkpointed to the durable log`);
+    this.onLog(`step ${name}: done in ${ms}ms — checkpointed to the durable log`);
+    this.onEvent({ event: "step", runId: this.runId, step: name, status: "done", ms, at: startedAt });
     return result;
   }
 }

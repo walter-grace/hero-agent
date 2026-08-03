@@ -73,18 +73,27 @@ async function main() {
       const memory = await makeMemory();
       const { DurableRun } = await import("../src/autoresearch/durable.mjs");
       const { runAutoresearchOnce, makeIngest } = await import("../src/autoresearch/loop.mjs");
-      const onLog = (m) => process.stderr.write(`  · ${m}\n`);
-      const run = new DurableRun({ memory, runId: `ar-${contribution}`, onLog });
+      // --log-json emits one structured JSON line per step event, so a run is machine-queryable and
+      // exportable (mirrors Vercel AI Gateway logs). Pipe it: `... --log-json 2>run.jsonl`.
+      const logJson = argv.includes("--log-json");
+      const onLog = (m) => { if (!logJson) process.stderr.write(`  · ${m}\n`); };
+      const onEvent = (rec) => { if (logJson) process.stderr.write(JSON.stringify(rec) + "\n"); };
+      const run = new DurableRun({ memory, runId: `ar-${contribution}`, onLog, onEvent });
       await run.load();
       const ingest = makeIngest({ url: process.env.FOUNDRY_INGEST_URL, attestorKey: process.env.FOUNDRY_ATTESTOR_KEY, onLog });
       const replayOpts = dryReplay
         ? { fake: { verdict: flag("fake-verdict", "improved"), delta: Number(flag("fake-delta", "0.05")), baseline: [1.0], candidate: [0.95], err: null } }
         : { seeds: Number(flag("seeds", 3)), steps: flag("steps") ? Number(flag("steps")) : null, timeoutMs: Number(flag("timeout", 900)) * 1000 };
-      console.error(`autoresearch · run ar-${contribution} · memory=${memory.label()} · ${dryReplay ? "DRY replay" : "E2B replay (egress OFF)"}\n`);
+      if (!logJson) console.error(`autoresearch · run ar-${contribution} · memory=${memory.label()} · ${dryReplay ? "DRY replay" : "E2B replay (egress OFF)"}\n`);
+      const t0 = Date.now();
       const out = await runAutoresearchOnce({ run, candidate: { contributionId: contribution, artifact, source: flag("source") || null }, ingest, replayOpts, onLog });
-      console.log("");
-      console.log(`outcome: ${out.outcome || "(none — skipped)"}${out.valBpbDelta != null ? `  ·  Δval_bpb ${out.valBpbDelta}` : ""}`);
-      console.log(`ingest: ${out.ingested?.dryRun ? "dry run (not posted)" : out.ingested?.skipped ? "skipped (" + out.ingested.reason + ")" : "posted to " + (process.env.FOUNDRY_INGEST_URL || "?")}`);
+      // Run-summary observability record (like a Vercel gateway request row: id, outcome, duration, status).
+      onEvent({ event: "run", runId: `ar-${contribution}`, contributionId: contribution, outcome: out.outcome || null, valBpbDelta: out.valBpbDelta ?? null, ingested: out.ingested?.dryRun ? "dry" : out.ingested?.skipped ? "skipped" : "posted", ms: Date.now() - t0, at: new Date().toISOString() });
+      if (!logJson) {
+        console.log("");
+        console.log(`outcome: ${out.outcome || "(none — skipped)"}${out.valBpbDelta != null ? `  ·  Δval_bpb ${out.valBpbDelta}` : ""}`);
+        console.log(`ingest: ${out.ingested?.dryRun ? "dry run (not posted)" : out.ingested?.skipped ? "skipped (" + out.ingested.reason + ")" : "posted to " + (process.env.FOUNDRY_INGEST_URL || "?")}`);
+      }
       return;
     }
     if (cmd === "replay") {

@@ -39,6 +39,26 @@ onchain|local`, `--agent <id>` (memory agent NFT id, for onchain), `--file <mem.
 path), `--seeds N`, `--steps N`, `--timeout <secs>`, `--source <s>`, `--dry-replay` (+`--fake-verdict`
 /`--fake-delta`).
 
+## Logs & observability
+
+Every step records observability fields into the durable log alongside its result: `status`
+(`done`/`cached`/`error`), `ms` (duration), and start/end timestamps. So the on-chain (or local) log
+doubles as a queryable run log — the same idea as a gateway request log (model/status/duration/cost
+per unit of work), but wallet-owned and verifiable.
+
+Add `--log-json` to emit one structured JSON line per step lifecycle event plus a run-summary line, so
+a run is machine-queryable and exportable:
+
+```bash
+AUTORESEARCH_ENABLED=1 hero-agent autoresearch <diff> --contribution <id> --dry-replay --log-json 2> run.jsonl
+# then, e.g.:
+jq 'select(.event=="run")' run.jsonl          # the run summary (outcome, ms, ingested)
+jq 'select(.status=="error")' run.jsonl        # any failed steps
+```
+
+Event shape: `{event:"step"|"run", runId, step?, status, ms, at, error?, outcome?, valBpbDelta?}`.
+Without `--log-json` you get human-readable `· step …` progress lines instead.
+
 ## What it posts
 
 To `FOUNDRY_INGEST_URL` (the web app's `resolveGroundTruth` seam), authed with `FOUNDRY_ATTESTOR_KEY`:
