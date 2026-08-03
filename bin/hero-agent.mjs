@@ -53,10 +53,40 @@ const onEvent = (type, data) => {
 
 // Commands that never call the Hero Run brain (they run entirely in a sandbox) do not need a
 // HERO_RUN_KEY. replay is the val_bpb oracle: it only needs E2B_API_KEY.
-const NO_BRAIN = new Set(["replay"]);
+const NO_BRAIN = new Set(["replay", "autoresearch"]);
 
 async function main() {
   if (NO_BRAIN.has(cmd)) {
+    // Durable autoresearch: run a candidate diff through the val_bpb replay as durable, on-chain-
+    // checkpointed steps, then post the verdict to the web app's ground-truth ingest seam. Each step
+    // is checkpointed to Robinhood Chain, so a crash resumes from the last completed step. Inert
+    // unless AUTORESEARCH_ENABLED=1. The web app stays the ingestion point (we only POST verdicts).
+    if (cmd === "autoresearch") {
+      if (process.env.AUTORESEARCH_ENABLED !== "1") { console.error("Autoresearch is off. Set AUTORESEARCH_ENABLED=1 to run it."); process.exit(1); }
+      const diffPath = rest[0], contribution = flag("contribution");
+      // The diff is a POSITIONAL arg (like `replay`), so --file stays the LOCAL MEMORY path (makeMemory).
+      if (!diffPath || !contribution) { console.error("Usage: hero-agent autoresearch <train.py-diff> --contribution <id> [--memory onchain|local] [--agent <id>] [--file <mem.jsonl>] [--seeds N] [--timeout secs] [--source <s>]"); process.exit(1); }
+      const dryReplay = argv.includes("--dry-replay");
+      if (!dryReplay && !process.env.E2B_API_KEY) { console.error("Set E2B_API_KEY for the replay sandbox (or pass --dry-replay to stub it)."); process.exit(1); }
+      const { readFileSync } = await import("node:fs");
+      let artifact; try { artifact = readFileSync(diffPath, "utf8"); } catch (e) { console.error(`cannot read ${diffPath}: ${e.message}`); process.exit(1); }
+      const memory = await makeMemory();
+      const { DurableRun } = await import("../src/autoresearch/durable.mjs");
+      const { runAutoresearchOnce, makeIngest } = await import("../src/autoresearch/loop.mjs");
+      const onLog = (m) => process.stderr.write(`  · ${m}\n`);
+      const run = new DurableRun({ memory, runId: `ar-${contribution}`, onLog });
+      await run.load();
+      const ingest = makeIngest({ url: process.env.FOUNDRY_INGEST_URL, attestorKey: process.env.FOUNDRY_ATTESTOR_KEY, onLog });
+      const replayOpts = dryReplay
+        ? { fake: { verdict: flag("fake-verdict", "improved"), delta: Number(flag("fake-delta", "0.05")), baseline: [1.0], candidate: [0.95], err: null } }
+        : { seeds: Number(flag("seeds", 3)), steps: flag("steps") ? Number(flag("steps")) : null, timeoutMs: Number(flag("timeout", 900)) * 1000 };
+      console.error(`autoresearch · run ar-${contribution} · memory=${memory.label()} · ${dryReplay ? "DRY replay" : "E2B replay (egress OFF)"}\n`);
+      const out = await runAutoresearchOnce({ run, candidate: { contributionId: contribution, artifact, source: flag("source") || null }, ingest, replayOpts, onLog });
+      console.log("");
+      console.log(`outcome: ${out.outcome || "(none — skipped)"}${out.valBpbDelta != null ? `  ·  Δval_bpb ${out.valBpbDelta}` : ""}`);
+      console.log(`ingest: ${out.ingested?.dryRun ? "dry run (not posted)" : out.ingested?.skipped ? "skipped (" + out.ingested.reason + ")" : "posted to " + (process.env.FOUNDRY_INGEST_URL || "?")}`);
+      return;
+    }
     if (cmd === "replay") {
       if (!process.env.E2B_API_KEY) { console.error("Set E2B_API_KEY (get one at https://e2b.dev/dashboard)."); process.exit(1); }
       const path = rest[0];
