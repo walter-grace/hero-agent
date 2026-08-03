@@ -37,7 +37,7 @@ hero-agent terminal-bench --dataset ./terminal-bench   # run against a Terminal-
 hero-agent swe-bench --dataset lite.jsonl              # produce SWE-bench Lite patches to score
 ```
 
-Flags: `--memory local|onchain` · `--file <path>` · `--agent <id>` · `--mcp "fs:npx -y @modelcontextprotocol/server-filesystem ."`
+Flags: `--memory local|onchain` · `--file <path>` · `--agent <id>` · `--mcp "fs:npx -y @modelcontextprotocol/server-filesystem ."` · `--fff` ([fast file search](#fast-file-search-optional))
 
 ## Memory: compaction, not a growing transcript
 
@@ -102,6 +102,35 @@ Success is objective: a clean `lake build` with zero errors and zero `sorry`. Le
 - **hero_generate**: an image or an audio clip from a prompt.
 - **aristotle_prove**: formalize a statement or fill `sorry`s into verified Lean 4 via Harmonic's Aristotle prover (used by `prove`).
 - **MCP**: point it at any [MCP](https://modelcontextprotocol.io) stdio server and its tools become the agent's tools.
+
+## Fast file search (optional)
+
+[**fff**](https://github.com/dmtrKovalenko/fff) (MIT) is a Rust file-search server built for AI agents: a resident in-memory index that answers in single-digit milliseconds on huge repos, with SIMD fuzzy path matching, Smith-Waterman content scoring, and frecency ranking. It is **optional**. hero-agent has no native dependency: fff is attached at runtime through the existing MCP client, and core commands (`chat`, `run`, `prove`, `replay`, `bench`) work exactly the same whether or not it is installed.
+
+Install the prebuilt `fff-mcp` binary (no npm or cargo needed):
+
+```bash
+curl -L https://dmtrkovalenko.dev/install-fff-mcp.sh | bash   # Linux/macOS, installs to ~/.local/bin
+brew install dmtrKovalenko/fff/fff-mcp                          # or Homebrew
+```
+
+Then enable it with the convenience flag:
+
+```bash
+hero-agent chat --fff       # the agent gets fff's file-search tools
+hero-agent run "where is the MCP client wired up?" --fff
+```
+
+`--fff` finds `fff-mcp` via `FFF_MCP_BIN`, then the common install dirs, then `PATH`. If it is not installed, hero-agent prints the install command and keeps running without file search, so the flag is always safe.
+
+No code path is required: `--fff` is just sugar over MCP, so you can wire the same server by hand and it works on any hero-agent build:
+
+```bash
+hero-agent chat --mcp "fff:$(brew --prefix)/bin/fff-mcp"
+hero-agent chat --mcp "fff:$HOME/.local/bin/fff-mcp"
+```
+
+Either way the agent gains three tools: `fff__find_files` (fuzzy filename search), `fff__grep` (content search), and `fff__multi_grep` (multi-pattern content search). The [search skill](skills/search/SEARCH.md) tells the agent to prefer these over shelling out to `grep`/`find` in a large repo. Because fff ships its own MCP server, the same install also benefits any Claude Code, Cursor, or Codex user (add `fff-mcp` to their MCP config), including alongside Hero Run's hosted MCP.
 
 ## Use it as a library
 
