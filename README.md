@@ -30,6 +30,8 @@ hero-agent run "research X and summarize"
 hero-agent remember "I prefer dark roasts"
 hero-agent recall                     # print the ROOT index + memory stats
 hero-agent compact                    # force a compaction now
+hero-agent export --out mine.json     # dump full decrypted history (entries + jobs + ROOT)
+hero-agent import mine.json           # load a bundle into this memory (fresh agent or after transfer)
 hero-agent smoke                      # cheap end-to-end check: one task, cheapest model
 hero-agent bench                      # measure cost per task on a light suite
 hero-agent bench-code                 # coding benchmark: solve tasks in a sandbox, score pass rate + cost
@@ -58,6 +60,8 @@ hero-agent chat --memory onchain --agent 7
 Each memory gets AES-256-GCM encrypted with a key derived from your wallet's signature, gzip'd, and checkpointed to the Agent Memory contract on Robinhood Chain. On-chain, and to Hero Run, it reads as random bytes. Only your wallet decrypts it. Because the key comes from the wallet rather than the agent, any agent you own can read another's memory: one brain across many agents. Mint an agent at [herorunai.com/agent](https://herorunai.com/agent).
 
 **Interoperable across surfaces.** This backend shares the exact contract, key derivation, blob format (byte 0 marker: 0 plaintext, 1 passphrase, 2 wallet-derived; then IV, then ciphertext), and payload envelope (`{v, at, entries}` inside the gzip; readers also accept the legacy bare-array shape) with the web app at herorunai.com/agent and the hosted MCP server. So memory written here is readable there, and by any MCP agent (Claude Code, Codex, Cursor) holding the same wallet, from one key. Write a memory in the CLI overnight, recall it on the website in the morning, or hand it to Claude Code.
+
+**Own it, take it with you.** `hero-agent export` dumps an agent's full decrypted history, entries plus jobs plus the ROOT index, as one JSON bundle; `hero-agent import` loads it into another agent. Because the encryption key is derived from the owner's wallet, transferring the agent NFT alone does not hand over readable history: the new owner holds a different key. Export under the old wallet, import under the new one to move it with the transfer. The chain stores the ciphertext; export is how you get the plaintext back out.
 
 ## Cost per task
 

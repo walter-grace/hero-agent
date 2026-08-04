@@ -58,7 +58,8 @@ const onEvent = (type, data) => {
 
 // Commands that never call the Hero Run brain (they run entirely in a sandbox) do not need a
 // HERO_RUN_KEY. replay is the val_bpb oracle: it only needs E2B_API_KEY.
-const NO_BRAIN = new Set(["replay", "autoresearch", "cascade-bench", "job", "run-due", "wallet"]);
+const NO_BRAIN = new Set(["replay", "autoresearch", "cascade-bench", "job", "run-due", "wallet", "export", "import", "attach", "files", "get-file"]);
+const MIME = { ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json", ".csv": "text/csv", ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".html": "text/html", ".js": "text/javascript" };
 
 async function main() {
   if (NO_BRAIN.has(cmd)) {
@@ -191,6 +192,100 @@ async function main() {
       console.error(`run-due · memory=${memory.label()}${dry ? " · DRY" : ""}\n`);
       const out = await runDue(memory, { chat, onLog: (m) => process.stderr.write("  · " + m + "\n") });
       console.log(`\n${out.due} due · ${out.ran} ran · ${out.defined} defined.`);
+      return;
+    }
+    if (cmd === "export") {
+      // Owner takeout: dump the agent's full decrypted history (entries + jobs + ROOT) as portable
+      // JSON. The data is on a chain you hold the key to; this hands it back in one blob you can
+      // re-import into another agent (import) or transfer with the NFT.
+      const memory = await makeMemory();
+      const { parseJobs } = await import("../src/jobs.mjs");
+      const entries = await memory.raw().catch(() => []);
+      const root = await memory.getRoot().catch(() => null);
+      const store = parseJobs(entries);
+      const bundle = {
+        v: 1, exportedAt: new Date().toISOString(), source: memory.label(),
+        root: root?.text || null,
+        jobs: [...store.jobs.values()],
+        entries: entries.map((e) => ({ role: e.role, text: e.text, at: e.at || (e.ts ? new Date(e.ts).toISOString() : undefined) })),
+      };
+      const json = JSON.stringify(bundle, null, 2);
+      const out = flag("out");
+      if (out) { const { writeFileSync } = await import("node:fs"); writeFileSync(out, json); console.error(`✓ exported ${bundle.entries.length} entries + ${bundle.jobs.length} job(s) → ${out}`); }
+      else console.log(json);
+      return;
+    }
+    if (cmd === "import") {
+      // Load an exported bundle into the current memory (a fresh agent, or after a transfer). On-chain
+      // memory checkpoints in chunks so a large history is a few transactions, not hundreds.
+      const path = rest[0];
+      if (!path) { console.error('Usage: hero-agent import <bundle.json> [--memory onchain --agent <id>] [--chunk 200]'); process.exit(1); }
+      const { readFileSync } = await import("node:fs");
+      let bundle;
+      try { bundle = JSON.parse(readFileSync(path, "utf8")); } catch (e) { console.error(`cannot read ${path}: ${e.message}`); process.exit(1); }
+      const entries = (bundle.entries || []).map((e) => ({ role: e.role, text: e.text })).filter((e) => e.role && typeof e.text === "string");
+      if (!entries.length) { console.error("bundle has no entries to import."); process.exit(1); }
+      const memory = await makeMemory();
+      const chunk = Math.max(1, Number(flag("chunk", 200)));
+      let done = 0;
+      for (let i = 0; i < entries.length; i += chunk) {
+        await memory.append(entries.slice(i, i + chunk));
+        done += Math.min(chunk, entries.length - i);
+        process.stderr.write(`  · imported ${done}/${entries.length}\n`);
+      }
+      if (bundle.root) { await memory.setRoot(bundle.root); process.stderr.write("  · restored ROOT index\n"); }
+      console.log(`✓ imported ${done} entries${bundle.root ? " + ROOT" : ""} into ${memory.label()}`);
+      return;
+    }
+    if (cmd === "attach") {
+      // Attach a file to an agent. Small files go inline in the encrypted checkpoint log; --uri stores
+      // a content-addressed pointer instead (for anything too big to sit on-chain). sha256 is the id
+      // and the tamper check either way.
+      const path = rest[0];
+      const uri = flag("uri");
+      const { basename, extname } = await import("node:path");
+      const memory = await makeMemory();
+      const { makeFileEntry, makeFilePointerEntry, sha256hex } = await import("../src/files.mjs");
+      let entry, meta;
+      if (uri) {
+        // Pointer: hash the local bytes for the commitment, but store only {sha256, uri} on-chain.
+        if (!path) { console.error('Usage: hero-agent attach <file> --uri ipfs://… [--memory onchain --agent N]'); process.exit(1); }
+        const { readFileSync } = await import("node:fs");
+        let buf; try { buf = readFileSync(path); } catch (e) { console.error(`cannot read ${path}: ${e.message}`); process.exit(1); }
+        entry = makeFilePointerEntry({ name: basename(path), mime: MIME[extname(path).toLowerCase()], size: buf.length, sha256: sha256hex(buf), uri });
+        meta = JSON.parse(entry.text.slice(6));
+      } else {
+        if (!path) { console.error('Usage: hero-agent attach <file> [--uri <pointer>] [--memory onchain --agent N]'); process.exit(1); }
+        const { readFileSync } = await import("node:fs");
+        let buf; try { buf = readFileSync(path); } catch (e) { console.error(`cannot read ${path}: ${e.message}`); process.exit(1); }
+        try { entry = makeFileEntry(buf, { name: basename(path), mime: MIME[extname(path).toLowerCase()] }); } catch (e) { console.error(e.message); process.exit(1); }
+        meta = JSON.parse(entry.text.slice(6));
+      }
+      await memory.append([entry]);
+      console.log(`✓ attached ${meta.name} (${(meta.size / 1024).toFixed(1)}KB, sha256 ${meta.sha256.slice(0, 12)}…${uri ? `, ${uri}` : ", inline"}) to ${memory.label()}`);
+      return;
+    }
+    if (cmd === "files") {
+      const memory = await makeMemory();
+      const { parseFiles } = await import("../src/files.mjs");
+      const files = parseFiles(await memory.raw().catch(() => []));
+      if (!files.size) { console.log("no files attached. Add one: hero-agent attach <file>"); return; }
+      console.log("sha256        size      where     name");
+      for (const f of files.values()) console.log(`${f.sha256.slice(0, 12)}  ${((f.size / 1024).toFixed(1) + "KB").padEnd(8)}  ${(f.uri ? "pointer" : "inline").padEnd(8)}  ${f.name}`);
+      return;
+    }
+    if (cmd === "get-file") {
+      const ref = rest[0];
+      if (!ref) { console.error('Usage: hero-agent get-file <sha256|name> --out <path>'); process.exit(1); }
+      const memory = await makeMemory();
+      const { extractFile } = await import("../src/files.mjs");
+      const f = extractFile(await memory.raw().catch(() => []), ref);
+      if (!f) { console.error(`no file matching "${ref}"`); process.exit(1); }
+      if (f.external) { console.log(`${f.name} is a pointer: ${f.uri}\nsha256 ${f.sha256} · fetch it, then verify the hash matches.`); return; }
+      const out = flag("out", f.name);
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(out, f.buf);
+      console.log(`✓ wrote ${out} (${(f.size / 1024).toFixed(1)}KB)${f.verified ? " · sha256 verified" : " · ⚠ sha256 MISMATCH"}`);
       return;
     }
     if (cmd === "replay") {
