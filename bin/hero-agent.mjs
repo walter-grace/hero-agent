@@ -53,10 +53,33 @@ const onEvent = (type, data) => {
 
 // Commands that never call the Hero Run brain (they run entirely in a sandbox) do not need a
 // HERO_RUN_KEY. replay is the val_bpb oracle: it only needs E2B_API_KEY.
-const NO_BRAIN = new Set(["replay", "autoresearch"]);
+const NO_BRAIN = new Set(["replay", "autoresearch", "cascade-bench"]);
 
 async function main() {
   if (NO_BRAIN.has(cmd)) {
+    // Cascade eval: measure cost/quality of a FrugalGPT-style cascade vs cheap/frontier/auto baselines.
+    // Needs HERO_RUN_KEY for a real run; --dry stubs the model calls (no key, no cost) to check the eval.
+    if (cmd === "cascade-bench") {
+      const dry = argv.includes("--dry");
+      if (!dry && !process.env.HERO_RUN_KEY) { console.error("Set HERO_RUN_KEY (or pass --dry to stub the model calls)."); process.exit(1); }
+      const { runCascadeBench, makeStubChat, heroUsd } = await import("../src/bench/cascade-bench.mjs");
+      const arms = (flag("arms", "cheap,frontier,auto,cascade")).split(",").map((s) => s.trim()).filter(Boolean);
+      const opts = { arms, cheap: flag("cheap", "cheapest"), frontier: flag("frontier", "anthropic/claude-sonnet-5"), judge: flag("judge", "openai/gpt-oss-20b"), threshold: Number(flag("threshold", 6)) };
+      let chat, usd;
+      if (dry) { chat = makeStubChat({ cheap: opts.cheap, frontier: opts.frontier }); usd = 0.0002; }
+      else { const { heroRun } = await import("../src/provider.mjs"); chat = heroRun({ apiKey: process.env.HERO_RUN_KEY }).chat; usd = await heroUsd(); }
+      console.error(`cascade-bench · arms=${arms.join(",")} · cheap=${opts.cheap} · frontier=${opts.frontier} · judge=${opts.judge} · τ=${opts.threshold}${dry ? " · DRY" : ""}\n`);
+      const out = await runCascadeBench({ ...opts, chat, usd, onEvent: (t, d) => { if (t === "cell" && d.arm === "cascade") process.stderr.write(`  · ${d.task.padEnd(11)} ${d.ok ? "✓" : "✗"}${d.escalated ? " ↑esc (" + (d.why || "") + ")" : ""}\n`); } });
+      const pct = (x) => x == null ? "—" : (x * 100).toFixed(0) + "%";
+      const h = (x) => x.toFixed(4);
+      console.log("\narm        acc    $HERO/run   ~USD/run   escal");
+      console.log("-".repeat(52));
+      for (const a of arms) { const A = out.arms[a]; console.log(`${a.padEnd(10)} ${pct(A.accuracy).padStart(4)}   ${h(A.costHero).padStart(9)}   ${("$" + (A.costUsd).toFixed(5)).padStart(8)}   ${A.escalationRate == null ? "—" : pct(A.escalationRate)}`); }
+      if (out.summary.qualityRetained != null) console.log(`\ncascade retains ${pct(out.summary.qualityRetained)} of frontier quality at ${pct(out.summary.costFraction)} of frontier cost.`);
+      if (out.summary.vsAuto) console.log(`vs auto: ${out.summary.vsAuto.costDeltaHero <= 0 ? "cheaper" : "pricier"} by ${h(Math.abs(out.summary.vsAuto.costDeltaHero))} $HERO/run, accuracy ${out.summary.vsAuto.accDelta >= 0 ? "+" : ""}${(out.summary.vsAuto.accDelta * 100).toFixed(0)}pts.`);
+      console.log(`\n(${out.tasks} tasks · ${dry ? "DRY stub" : "live"}. Decide ship on the cascade-vs-auto line.)`);
+      return;
+    }
     // Durable autoresearch: run a candidate diff through the val_bpb replay as durable, on-chain-
     // checkpointed steps, then post the verdict to the web app's ground-truth ingest seam. Each step
     // is checkpointed to Robinhood Chain, so a crash resumes from the last completed step. Inert
