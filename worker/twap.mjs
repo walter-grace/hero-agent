@@ -84,10 +84,30 @@ export async function executeChunk({ plan, i, privateKey, rpc = "https://mainnet
   });
   // one-time unlimited approval to Kyber's router is the /twap page's own pattern; here we approve
   // exactly per-chunk to keep the burner's exposure at one chunk
-  const allowanceData = `0x095ea7b3${built.routerAddress.slice(2).padStart(64, "0")}${BigInt(amountIn).toString(16).padStart(64, "0")}`;
-  const approveTx = await wc.sendTransaction({ to: USDC, data: allowanceData });
-  await pub.waitForTransactionReceipt({ hash: approveTx });
-  const tx = await wc.sendTransaction({ to: built.routerAddress, data: built.data, value: 0n });
+  const ALLOW_ABI = [{ type: "function", name: "allowance", stateMutability: "view", inputs: [{ type: "address" }, { type: "address" }], outputs: [{ type: "uint256" }] }];
+  const current = await pub.readContract({ address: USDC, abi: ALLOW_ABI, functionName: "allowance", args: [account.address, built.routerAddress] }).catch(() => 0n);
+  if (current < BigInt(amountIn)) {
+    const allowanceData = `0x095ea7b3${built.routerAddress.slice(2).padStart(64, "0")}${BigInt(amountIn).toString(16).padStart(64, "0")}`;
+    const approveTx = await wc.sendTransaction({ to: USDC, data: allowanceData });
+    await pub.waitForTransactionReceipt({ hash: approveTx });
+    // Public RPCs are load-balanced over replicas that can lag a block or two: the receipt being
+    // in does NOT mean the next eth_call/estimateGas sees the new allowance. Poll until the
+    // allowance actually reads back, or the swap's own simulation reverts TRANSFER_FROM_FAILED.
+    for (let i = 0; i < 15; i++) {
+      const a = await pub.readContract({ address: USDC, abi: ALLOW_ABI, functionName: "allowance", args: [account.address, built.routerAddress] }).catch(() => 0n);
+      if (a >= BigInt(amountIn)) break;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  // one bounded retry for the same replica-lag class of failure on the swap itself
+  let tx;
+  try {
+    tx = await wc.sendTransaction({ to: built.routerAddress, data: built.data, value: 0n });
+  } catch (e) {
+    if (!/TRANSFER_FROM_FAILED|transfer amount exceeds allowance/i.test(e.message || "")) throw e;
+    await new Promise((r) => setTimeout(r, 5000));
+    tx = await wc.sendTransaction({ to: built.routerAddress, data: built.data, value: 0n });
+  }
   await pub.waitForTransactionReceipt({ hash: tx });
   return { tx, amountOut: summary.amountOut };
 }
