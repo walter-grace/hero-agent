@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hero-jobs-worker",
+  "main": "index.mjs",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  // The always-on scheduler: fire the job tick every 30 minutes. run-due is interval-gated, so this
+  // cadence just bounds how soon a due job runs — tighten or loosen freely.
+  "triggers": { "crons": ["*/30 * * * *"] },
+  "vars": {
+    "AGENT_IDS": "",
+    "HERO_MEM_ADDR": "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef",
+    "RH_RPC": "https://rpc.mainnet.chain.robinhood.com",
+    "HERO_BASE": "https://herorunai.com"
+  }
+  // Secrets (wrangler secret put): AGENT_PRIVATE_KEY, HERO_RUN_KEY, RUN_SECRET
+}

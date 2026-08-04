@@ -1,0 +1,18 @@
+{
+  "name": "hero-jobs-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker cron that runs due agent jobs from on-chain memory.",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "viem": "^2.21.0",
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
