@@ -25,7 +25,12 @@ async function makeMemory() {
   const kind = flag("memory", "local");
   if (kind === "onchain") {
     const { OnchainMemory } = await import("../src/memory/onchain.mjs");
-    return new OnchainMemory({ agentId: flag("agent") });
+    // --key-file loads the private key from a chmod-600 file instead of AGENT_PRIVATE_KEY, so the key
+    // never has to live in an env var or get pasted. Falls back to AGENT_PRIVATE_KEY when absent.
+    const kf = flag("key-file");
+    let privateKey;
+    if (kf) { const { readKeyFile } = await import("../src/wallet.mjs"); privateKey = readKeyFile(kf); }
+    return new OnchainMemory({ agentId: flag("agent"), ...(privateKey ? { privateKey } : {}) });
   }
   return new LocalMemory({ file: flag("file", join(homedir(), ".hero-agent", "memory", "default.jsonl")) });
 }
@@ -53,10 +58,42 @@ const onEvent = (type, data) => {
 
 // Commands that never call the Hero Run brain (they run entirely in a sandbox) do not need a
 // HERO_RUN_KEY. replay is the val_bpb oracle: it only needs E2B_API_KEY.
-const NO_BRAIN = new Set(["replay", "autoresearch", "cascade-bench"]);
+const NO_BRAIN = new Set(["replay", "autoresearch", "cascade-bench", "job", "run-due", "wallet"]);
 
 async function main() {
   if (NO_BRAIN.has(cmd)) {
+    // Burner-wallet helpers so a key is never pasted anywhere. `wallet new` writes a fresh key to a
+    // chmod-600 file (prints only the address); `wallet mint-agent` mints a dedicated cron agent from it.
+    if (cmd === "wallet") {
+      const { generateBurner, mintCronAgent } = await import("../src/wallet.mjs");
+      const sub = rest[0];
+      if (sub === "new") {
+        const { address, path } = generateBurner({ outPath: flag("out") });
+        console.log("Burner wallet created (key written to a 0600 file, never printed):");
+        console.log(`  address:  ${address}`);
+        console.log(`  key file: ${path}`);
+        console.log("\nNext:");
+        console.log(`  1. Fund ${address} with a little Robinhood Chain gas.`);
+        console.log(`  2. Mint its cron agent:   hero-agent wallet mint-agent --key-file ${path}`);
+        console.log(`  3. Load the key into the worker WITHOUT pasting it:`);
+        console.log(`       npx wrangler secret put AGENT_PRIVATE_KEY < ${path}`);
+        return;
+      }
+      if (sub === "mint-agent") {
+        const kf = flag("key-file");
+        if (!kf) { console.error("Usage: hero-agent wallet mint-agent --key-file <path> [--label cron]"); process.exit(1); }
+        console.error("Minting a cron agent on Robinhood Chain…");
+        const { address, agentId, tx } = await mintCronAgent({ keyFile: kf, label: flag("label", "cron") });
+        console.log(`Minted agent #${agentId} owned by ${address}`);
+        console.log(`  tx: https://robinhoodchain.blockscout.com/tx/${tx}`);
+        console.log("\nNext:");
+        console.log(`  - set AGENT_IDS="${agentId}" in worker/wrangler.jsonc, then redeploy the worker`);
+        console.log(`  - schedule a job:  hero-agent job add "<task>" --every 6h --memory onchain --agent ${agentId} --key-file ${kf}`);
+        return;
+      }
+      console.error("Usage: hero-agent wallet new [--out <path>]  |  hero-agent wallet mint-agent --key-file <path> [--label cron]");
+      process.exit(1);
+    }
     // Cascade eval: measure cost/quality of a FrugalGPT-style cascade vs cheap/frontier/auto baselines.
     // Needs HERO_RUN_KEY for a real run; --dry stubs the model calls (no key, no cost) to check the eval.
     if (cmd === "cascade-bench") {
@@ -117,6 +154,43 @@ async function main() {
         console.log(`outcome: ${out.outcome || "(none — skipped)"}${out.valBpbDelta != null ? `  ·  Δval_bpb ${out.valBpbDelta}` : ""}`);
         console.log(`ingest: ${out.ingested?.dryRun ? "dry run (not posted)" : out.ingested?.skipped ? "skipped (" + out.ingested.reason + ")" : "posted to " + (process.env.FOUNDRY_INGEST_URL || "?")}`);
       }
+      return;
+    }
+    // Scheduled jobs stored in on-chain memory (the decentralized cron). `job add/list` manage them;
+    // `run-due` is the tick a cron (Cloudflare Worker / Vercel cron / launchd) calls to run due jobs.
+    if (cmd === "job") {
+      const { addJob, parseJobs, parseDuration, fmtDuration } = await import("../src/jobs.mjs");
+      const sub = rest[0];
+      const memory = await makeMemory();
+      if (sub === "add") {
+        const task = rest[1];
+        if (!task) { console.error('Usage: hero-agent job add "<task>" --every 6h [--memory onchain --agent <id>] [--file <mem>]'); process.exit(1); }
+        const everyMs = parseDuration(flag("every", "6h"));
+        const j = await addJob(memory, { task, everyMs });
+        console.log(`added ${j.jobId} · every ${fmtDuration(everyMs)} · "${task}"`);
+        console.error(`stored in ${memory.label()}`);
+        return;
+      }
+      const store = parseJobs(await memory.raw().catch(() => []));
+      if (!store.jobs.size) { console.log("no jobs yet. Add one: hero-agent job add \"<task>\" --every 6h"); return; }
+      console.log("jobId          every   lastRun                    task");
+      for (const [id, jb] of store.jobs) {
+        const last = store.lastRun.get(id);
+        console.log(`${id.padEnd(14)} ${fmtDuration(jb.everyMs).padEnd(6)}  ${(last ? new Date(last).toISOString() : "never").padEnd(25)} ${String(jb.task).slice(0, 44)}`);
+      }
+      return;
+    }
+    if (cmd === "run-due") {
+      const dry = argv.includes("--dry");
+      if (!dry && !process.env.HERO_RUN_KEY) { console.error("Set HERO_RUN_KEY to run jobs (or pass --dry to stub the brain)."); process.exit(1); }
+      const memory = await makeMemory();
+      const { runDue } = await import("../src/jobs.mjs");
+      let chat;
+      if (dry) chat = async ({ messages }) => ({ content: "[dry] would run: " + String(messages[messages.length - 1].content).slice(0, 50) });
+      else { const { heroRun } = await import("../src/provider.mjs"); chat = heroRun({ apiKey: process.env.HERO_RUN_KEY }).chat; }
+      console.error(`run-due · memory=${memory.label()}${dry ? " · DRY" : ""}\n`);
+      const out = await runDue(memory, { chat, onLog: (m) => process.stderr.write("  · " + m + "\n") });
+      console.log(`\n${out.due} due · ${out.ran} ran · ${out.defined} defined.`);
       return;
     }
     if (cmd === "replay") {
