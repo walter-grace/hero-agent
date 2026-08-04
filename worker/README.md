@@ -61,6 +61,16 @@ curl -X POST https://hero-jobs-worker.<subdomain>.workers.dev/run -H "Authorizat
 
 `GET /` returns a health JSON.
 
+## Tracing
+
+Every tick emits structured, content-free spans that Cloudflare's Workers Observability indexes
+(`observability.enabled` is already on in `wrangler.jsonc`): `llm.call` (latency, token usage,
+resolved model, gateway, `$HERO` charged), `job.run` (per-job latency, ok, result length), and
+`cron.tick` (agents, due, ran, errors, total ms), all sharing a `trace_id`. Query them in the
+dashboard or `wrangler tail`. The spans carry timings, counts, model, and cost only — never prompt or
+result text, which stays encrypted on-chain. The `gen_ai.*` keys follow OpenTelemetry's GenAI
+convention, so pointing at an OTel sink later is a config change, not a rewrite.
+
 ## The full loop
 
 1. Schedule a job on an agent NFT — from the memory graph (Append/Schedule panel) or `hero-agent job add`.

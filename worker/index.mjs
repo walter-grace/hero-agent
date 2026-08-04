@@ -11,35 +11,63 @@
 import { WorkerMemory } from "./memory.mjs";
 import { runDue } from "../src/jobs.mjs";
 
-// The brain: one chat completion through Hero Run's OpenAI-compatible /v1, paid in $HERO.
-function makeChat(env) {
+// Tracing. Structured, content-free spans (timings, counts, model, cost — never prompt or result text,
+// which is encrypted). Emitted as one-line JSON so Cloudflare's Workers Observability (enabled in
+// wrangler.jsonc) indexes and lets you query them; the gen_ai.* keys follow OTel's GenAI convention so
+// the same events export cleanly if you later add an OTel sink. Correlated by a per-tick trace id.
+const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+function tracer(traceId) {
+  return (name, attrs = {}) => { try { console.log(JSON.stringify({ span: name, trace_id: traceId, ...attrs })); } catch {} };
+}
+
+// The brain: one chat completion through Hero Run's OpenAI-compatible /v1, paid in $HERO. Emits an
+// llm.call span with latency, token usage, resolved model, and $HERO charged when a tracer is given.
+function makeChat(env, trace) {
   return async ({ model = "auto", messages, maxTokens = 600 }) => {
+    const t0 = nowMs();
     const r = await fetch(`${env.HERO_BASE || "https://herorunai.com"}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.HERO_RUN_KEY}` },
       body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
     });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok || d.error) throw new Error(`Hero Run ${r.status}: ${d.error?.message || d.error || ""}`);
+    const ms = Math.round(nowMs() - t0);
+    if (!r.ok || d.error) {
+      trace?.("llm.call", { ok: false, ms, "gen_ai.request.model": model, http: r.status });
+      throw new Error(`Hero Run ${r.status}: ${d.error?.message || d.error || ""}`);
+    }
+    const hero = d.x_hero || d.hero || {};
+    trace?.("llm.call", {
+      ok: true, ms,
+      "gen_ai.request.model": model,
+      "gen_ai.response.model": hero.resolved_model || d.model || null,
+      gateway: hero.gateway || null,
+      "gen_ai.usage.input_tokens": d.usage?.prompt_tokens ?? null,
+      "gen_ai.usage.output_tokens": d.usage?.completion_tokens ?? null,
+      charged_hero: hero.charged_hero ?? null,
+    });
     return { content: d.choices?.[0]?.message?.content || "" };
   };
 }
 
-async function tick(env, log = console.log) {
+async function tick(env, log = console.log, traceId) {
+  const trace = tracer(traceId || `tick-${Math.random().toString(36).slice(2, 10)}`);
+  const t0 = nowMs();
   const ids = String(env.AGENT_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!ids.length) { log("no AGENT_IDS configured — nothing to do"); return { agents: 0, ran: 0 }; }
   if (!env.AGENT_PRIVATE_KEY || !env.HERO_RUN_KEY) { log("missing AGENT_PRIVATE_KEY or HERO_RUN_KEY"); return { agents: 0, ran: 0, error: "missing secrets" }; }
-  const chat = makeChat(env);
-  let ran = 0;
+  const chat = makeChat(env, trace);
+  let ran = 0, due = 0, errors = 0;
   const per = [];
   for (const id of ids) {
     try {
       const mem = new WorkerMemory({ agentId: id, privateKey: env.AGENT_PRIVATE_KEY, memAddr: env.HERO_MEM_ADDR, rpc: env.RH_RPC });
-      const out = await runDue(mem, { chat, onLog: (m) => log(`[agent ${id}] ${m}`) });
-      ran += out.ran; per.push({ agent: id, ...out });
+      const out = await runDue(mem, { chat, onLog: (m) => log(`[agent ${id}] ${m}`), onSpan: (s) => trace(s.name, { agent: id, ...s }) });
+      ran += out.ran; due += out.due; per.push({ agent: id, ...out });
       log(`[agent ${id}] ${out.ran}/${out.due} ran (${out.defined} defined)`);
-    } catch (e) { log(`[agent ${id}] ERROR ${e.message}`); per.push({ agent: id, error: e.message }); }
+    } catch (e) { errors++; log(`[agent ${id}] ERROR ${e.message}`); per.push({ agent: id, error: e.message }); trace("agent.error", { agent: id, message: e.message }); }
   }
+  trace("cron.tick", { agents: ids.length, due, ran, errors, ms: Math.round(nowMs() - t0) });
   return { agents: ids.length, ran, per };
 }
 

@@ -51,13 +51,17 @@ export async function addJob(memory, { task, everyMs, jobId, enabled = true }) {
 // The cron tick. Read jobs from memory, run every due one through `chat`, checkpoint each result.
 // `chat({model,messages,maxTokens})` is the brain (hero-agent provider) or a stub. `rootContext` is
 // the agent's memory summary, injected so the task runs "in the memory."
-export async function runDue(memory, { chat, now = Date.now(), rootContext = "", onLog = () => {} }) {
+// `onSpan(span)` receives a per-job trace event with timings and counts only — never task or result
+// text — so a tracing backend (Cloudflare, OTel) can record it without leaking encrypted job content.
+export async function runDue(memory, { chat, now = Date.now(), rootContext = "", onLog = () => {}, onSpan = () => {} }) {
   const store = parseJobs(await memory.raw().catch(() => []));
   const due = dueJobs(store, now);
   onLog(`${store.jobs.size} job(s) defined · ${due.length} due`);
   const results = [];
   for (const j of due) {
     onLog(`run ${j.jobId}: ${String(j.task).slice(0, 60)}`);
+    const startedAt = now === Date.now() ? now : Date.now();
+    const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
     let ok = true, result;
     try {
       const msg = await chat({ model: "auto", maxTokens: 600, messages: [
@@ -66,9 +70,11 @@ export async function runDue(memory, { chat, now = Date.now(), rootContext = "",
       ] });
       result = String(msg.content || "").trim();
     } catch (e) { ok = false; result = "error: " + e.message; }
+    const ms = Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0);
     await memory.append([{ role: "system", text: RUN_MARK + JSON.stringify({ jobId: j.jobId, at: new Date(now).toISOString(), ok, result: result.slice(0, 1200) }) }]);
     results.push({ jobId: j.jobId, ok, result });
-    onLog(`  ${ok ? "ok" : "error"}: ${result.slice(0, 70)}`);
+    onSpan({ name: "job.run", jobId: j.jobId, ms, ok, resultChars: result.length, everyMs: j.everyMs });
+    onLog(`  ${ok ? "ok" : "error"} in ${ms}ms: ${result.slice(0, 70)}`);
   }
   return { defined: store.jobs.size, due: due.length, ran: results.length, results };
 }
