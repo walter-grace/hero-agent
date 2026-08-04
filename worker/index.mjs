@@ -10,6 +10,7 @@
 // Vars (wrangler.jsonc): AGENT_IDS ("3,6"), HERO_MEM_ADDR, RH_RPC, HERO_BASE.
 import { WorkerMemory } from "./memory.mjs";
 import { runDue } from "../src/jobs.mjs";
+import { runTwapTick } from "./twap.mjs";
 
 // Tracing. Structured, content-free spans (timings, counts, model, cost — never prompt or result text,
 // which is encrypted). Emitted as one-line JSON so Cloudflare's Workers Observability (enabled in
@@ -65,6 +66,12 @@ async function tick(env, log = console.log, traceId) {
       const out = await runDue(mem, { chat, onLog: (m) => log(`[agent ${id}] ${m}`), onSpan: (s) => trace(s.name, { agent: id, ...s }) });
       ran += out.ran; due += out.due; per.push({ agent: id, ...out });
       log(`[agent ${id}] ${out.ran}/${out.due} ran (${out.defined} defined)`);
+      // Durable TWAP: if this agent's memory carries a twap:: plan, execute the next due chunk.
+      // Spends from the SAME key (the session/burner wallet the plan was created for).
+      try {
+        const tw = await runTwapTick(mem, { privateKey: env.AGENT_PRIVATE_KEY, holdMin: Number(env.HERO_TWAP_MIN ?? 1_000_000), log: (m) => log(`[agent ${id}] ${m}`) });
+        if (tw.acted) { trace("twap.chunk", { agent: id }); per[per.length - 1].twap = tw; }
+      } catch (e) { log(`[agent ${id}] twap ERROR ${e.message}`); }
     } catch (e) { errors++; log(`[agent ${id}] ERROR ${e.message}`); per.push({ agent: id, error: e.message }); trace("agent.error", { agent: id, message: e.message }); }
   }
   trace("cron.tick", { agents: ids.length, due, ran, errors, ms: Math.round(nowMs() - t0) });
