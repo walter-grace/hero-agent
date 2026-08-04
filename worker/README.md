@@ -9,6 +9,25 @@ It reuses the same protocol as the CLI: `../src/jobs.mjs` (unchanged) for the jo
 Workers-native memory client (`memory.mjs`: viem + WebCrypto + fflate) that reads/writes the same
 encrypted, hash-chained checkpoints the browser and CLI do.
 
+## Set up a burner (never paste a key)
+
+Use a dedicated burner wallet + its own agent for the cron, so the key in the Worker can only touch a
+throwaway wallet. The key is written to a `chmod 600` file and never printed:
+
+```bash
+hero-agent wallet new                                  # writes ~/.hero-agent/keys/<address>.key, prints only the address
+# fund that address with a little RH gas, then:
+hero-agent wallet mint-agent --key-file ~/.hero-agent/keys/<address>.key   # mints the cron agent, prints its id
+# schedule work on it (key stays in the file, --key-file loads it):
+hero-agent job add "…" --every 6h --memory onchain --agent <id> --key-file ~/.hero-agent/keys/<address>.key
+```
+
+Then set `AGENT_IDS` to that agent id below, and load the key into the Worker straight from the file:
+
+```bash
+npx wrangler secret put AGENT_PRIVATE_KEY < ~/.hero-agent/keys/<address>.key   # file → Cloudflare, never pasted
+```
+
 ## Deploy
 
 Prereqs: Cloudflare Workers Paid isn't required for cron (cron is on the free plan), `npx wrangler login`.
