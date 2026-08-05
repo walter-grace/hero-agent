@@ -12,7 +12,7 @@ import { pathToFileURL } from "node:url";
 const BURNER_ADDR = "0x66e07BDa43afEc9360A1c4B1CFd5D61564F50ceA";
 const BURNER_KEYFILE = `${homedir()}/.hero-agent/keys/${BURNER_ADDR}.key`;
 const RECIPIENT = "0x00dD6F77f995235588A6277e4BAC763e24F7f749"; // your main wallet — where bought HERO lands, holds >1M HERO so the stake gate passes
-const MEM = "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
+const MEM = "0xce4dc968827a996f7bd5bbdb0fcb72348b18d0dc";
 const HERO_RH = "0xbA221e393645901C962Ad21E4e7FA097d550B67c";
 const FUND_WEI = parseEther("0.00014"); // 2×0.00002 ETH spend + gas for mint/checkpoints/swaps + cushion
 

@@ -11,7 +11,7 @@ import { gzipSync, gunzipSync } from "node:zlib";
 import { keccak256, toBytes, toHex, encodePacked, encodeFunctionData, createWalletClient, createPublicClient, http, defineChain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-const MEM_ADDR = process.env.HERO_MEM_ADDR || "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef";
+const MEM_ADDR = process.env.HERO_MEM_ADDR || "0xce4dc968827a996f7bd5bbdb0fcb72348b18d0dc";
 const RH_RPC = process.env.RH_RPC || "https://rpc.mainnet.chain.robinhood.com";
 // Key-derivation message. v2 is domain-separated and self-warning so a single blind phished signature
 // is not silently reusable, and versioned for future rotation. Writers seal with the v2 key; readers

@@ -13,12 +13,17 @@
     // Agents this cron runs. Must be owned by AGENT_PRIVATE_KEY's wallet (memory is owner-key-encrypted).
     // Set to your test agent; comma-separate to run several, e.g. "3,4,6".
     "AGENT_IDS": "10",
-    "HERO_MEM_ADDR": "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef",
+    "HERO_MEM_ADDR": "0xce4dc968827a996f7bd5bbdb0fcb72348b18d0dc",
     "HERO_BASE": "https://herorunai.com",
     // Shared "run it for me" mode: the worker pulls every registered plan from here and runs each
     // with its own scoped session key. Pairs with the WORKER_SECRET secret. Leave AGENT_IDS empty
     // to run ONLY shared plans, or set it to also service your own agents.
-    "REGISTRY_URL": "https://herorunai.com"
+    "REGISTRY_URL": "https://herorunai.com",
+    // Tier 3 backstop keeper: the on-chain HeroTwapKeeper (permissionless DCA into RH stocks with
+    // USDG). Each tick, pollKeeper executes any due chunk so plans run even if no third-party bot
+    // shows up. Uses AGENT_PRIVATE_KEY's wallet to submit + earns the USDG keeper reward. Inert
+    // when empty. Production keeper (minHold = 1,000,000 HERO gate) on Robinhood Chain (4663).
+    "KEEPER_ADDRESS": "0x5404e5753942c6d7660f0036b6dac35aafd09093"
     // RH_RPC is now a SECRET (Alchemy RH endpoint w/ API key) — set via `wrangler secret put RH_RPC`.
     // The public RPC rate-limited the worker mid-tick; a private endpoint has the headroom.
   }

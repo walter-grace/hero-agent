@@ -12,7 +12,7 @@ const ABI = [{ name: "checkpoint", type: "function", stateMutability: "nonpayabl
 const cat = (...a) => { const n = a.reduce((s, x) => s + x.length, 0); const o = new Uint8Array(n); let p = 0; for (const x of a) { o.set(x, p); p += x.length; } return o; };
 
 export class WorkerMemory {
-  constructor({ agentId, privateKey, memAddr = "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef", rpc = "https://rpc.mainnet.chain.robinhood.com" }) {
+  constructor({ agentId, privateKey, memAddr = "0xce4dc968827a996f7bd5bbdb0fcb72348b18d0dc", rpc = "https://rpc.mainnet.chain.robinhood.com" }) {
     if (!privateKey) throw new Error("AGENT_PRIVATE_KEY required");
     if (agentId == null) throw new Error("agentId required");
     this.agentId = BigInt(agentId);
