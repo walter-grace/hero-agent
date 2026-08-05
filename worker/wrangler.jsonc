@@ -12,10 +12,11 @@
   "vars": {
     // Agents this cron runs. Must be owned by AGENT_PRIVATE_KEY's wallet (memory is owner-key-encrypted).
     // Set to your test agent; comma-separate to run several, e.g. "3,4,6".
-    "AGENT_IDS": "4",
+    "AGENT_IDS": "10",
     "HERO_MEM_ADDR": "0x881a9f7ed58b7655c3c04bb2f9ef2cffd233a5ef",
-    "RH_RPC": "https://rpc.mainnet.chain.robinhood.com",
     "HERO_BASE": "https://herorunai.com"
+    // RH_RPC is now a SECRET (Alchemy RH endpoint w/ API key) — set via `wrangler secret put RH_RPC`.
+    // The public RPC rate-limited the worker mid-tick; a private endpoint has the headroom.
   }
   // Secrets (wrangler secret put): AGENT_PRIVATE_KEY, HERO_RUN_KEY, RUN_SECRET
 }

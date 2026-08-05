@@ -56,20 +56,24 @@ async function tick(env, log = console.log, traceId) {
   const t0 = nowMs();
   const ids = String(env.AGENT_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!ids.length) { log("no AGENT_IDS configured — nothing to do"); return { agents: 0, ran: 0 }; }
-  if (!env.AGENT_PRIVATE_KEY || !env.HERO_RUN_KEY) { log("missing AGENT_PRIVATE_KEY or HERO_RUN_KEY"); return { agents: 0, ran: 0, error: "missing secrets" }; }
-  const chat = makeChat(env, trace);
+  if (!env.AGENT_PRIVATE_KEY) { log("missing AGENT_PRIVATE_KEY"); return { agents: 0, ran: 0, error: "missing key" }; }
+  // HERO_RUN_KEY is only needed to run scheduled LLM jobs; durable TWAP doesn't use it. Without it,
+  // skip jobs and still execute TWAP — so a TWAP-only worker needs just the wallet key.
+  const runJobs = !!env.HERO_RUN_KEY;
+  const chat = runJobs ? makeChat(env, trace) : null;
   let ran = 0, due = 0, errors = 0;
   const per = [];
   for (const id of ids) {
     try {
       const mem = new WorkerMemory({ agentId: id, privateKey: env.AGENT_PRIVATE_KEY, memAddr: env.HERO_MEM_ADDR, rpc: env.RH_RPC });
-      const out = await runDue(mem, { chat, onLog: (m) => log(`[agent ${id}] ${m}`), onSpan: (s) => trace(s.name, { agent: id, ...s }) });
+      let out = { ran: 0, due: 0, defined: 0 };
+      if (runJobs) { out = await runDue(mem, { chat, onLog: (m) => log(`[agent ${id}] ${m}`), onSpan: (s) => trace(s.name, { agent: id, ...s }) }); }
       ran += out.ran; due += out.due; per.push({ agent: id, ...out });
-      log(`[agent ${id}] ${out.ran}/${out.due} ran (${out.defined} defined)`);
+      if (runJobs) log(`[agent ${id}] ${out.ran}/${out.due} jobs ran (${out.defined} defined)`);
       // Durable TWAP: if this agent's memory carries a twap:: plan, execute the next due chunk.
       // Spends from the SAME key (the session/burner wallet the plan was created for).
       try {
-        const tw = await runTwapTick(mem, { privateKey: env.AGENT_PRIVATE_KEY, holdMin: Number(env.HERO_TWAP_MIN ?? 1_000_000), log: (m) => log(`[agent ${id}] ${m}`) });
+        const tw = await runTwapTick(mem, { privateKey: env.AGENT_PRIVATE_KEY, holdMin: Number(env.HERO_TWAP_MIN ?? 1_000_000), rhRpc: env.RH_RPC, baseRpc: env.BASE_RPC, log: (m) => log(`[agent ${id}] ${m}`) });
         if (tw.acted) { trace("twap.chunk", { agent: id }); per[per.length - 1].twap = tw; }
       } catch (e) { log(`[agent ${id}] twap ERROR ${e.message}`); }
     } catch (e) { errors++; log(`[agent ${id}] ERROR ${e.message}`); per.push({ agent: id, error: e.message }); trace("agent.error", { agent: id, message: e.message }); }

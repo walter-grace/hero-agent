@@ -21,8 +21,8 @@ export class WorkerMemory {
     this.KEY_MSG_V1 = `Hero Agent Memory encryption key v1\nContract: ${memAddr}\nChain: 4663`;
     const chain = defineChain({ id: 4663, name: "Robinhood Chain", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [rpc] } } });
     this.account = privateKeyToAccount(privateKey.startsWith("0x") ? privateKey : "0x" + privateKey);
-    this.wallet = createWalletClient({ account: this.account, chain, transport: http(rpc) });
-    this.pub = createPublicClient({ chain, transport: http(rpc) });
+    this.wallet = createWalletClient({ account: this.account, chain, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
+    this.pub = createPublicClient({ chain, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
     this._key = null; this._keyV1 = null;
   }
   label() { return `onchain(rh):agent#${this.agentId}`; }

@@ -41,9 +41,9 @@ const BAL_ABI = [{ type: "function", name: "balanceOf", stateMutability: "view",
 // every chunk, not once at setup — dump the stake mid-run and the cron stops spending. v1 is a
 // held-balance gate (nothing locked); v2 is a real staking escrow with slashing.
 export async function heroHoldingsOf(address, { baseRpc = "https://mainnet.base.org", rhRpc = RH_RPC } = {}) {
-  const basePub = createPublicClient({ chain: base, transport: http(baseRpc) });
+  const basePub = createPublicClient({ chain: base, transport: http(baseRpc, { retryCount: 8, retryDelay: 2000 }) });
   const read = (pub, token) => pub.readContract({ address: token, abi: BAL_ABI, functionName: "balanceOf", args: [address] }).catch(() => 0n);
-  const rhPub = createPublicClient({ transport: http(rhRpc) });
+  const rhPub = createPublicClient({ transport: http(rhRpc, { retryCount: 8, retryDelay: 2000 }) });
   const [a, b] = await Promise.all([read(basePub, HERO_BASE), read(rhPub, HERO_RH)]);
   return Number((a + b) / 10n ** 18n);
 }
@@ -88,8 +88,8 @@ async function kyber(path, init) {
 // filling badly with nobody watching.
 export async function executeChunkRh({ plan, i, privateKey, rpc = RH_CHAIN.rpcUrls.default.http[0], slippageBps = 2000 }) {
   const account = privateKeyToAccount(privateKey);
-  const pub = createPublicClient({ chain: RH_CHAIN, transport: http(rpc) });
-  const wc = createWalletClient({ account, chain: RH_CHAIN, transport: http(rpc) });
+  const pub = createPublicClient({ chain: RH_CHAIN, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
+  const wc = createWalletClient({ account, chain: RH_CHAIN, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
   const amountIn = BigInt(plan.chunks[i].amountIn); // wei
   const fee = plan.fee || 10000;
   const { result } = await pub.simulateContract({ account: account.address, address: RH_QUOTER, abi: RH_QUOTER_ABI, functionName: "quoteExactInputSingle", args: [{ tokenIn: RH_WETH, tokenOut: plan.tokenOut, amountIn, fee, sqrtPriceLimitX96: 0n }] });
@@ -104,8 +104,8 @@ export async function executeChunkRh({ plan, i, privateKey, rpc = RH_CHAIN.rpcUr
 // Execute one chunk: quote → build → send from the session wallet, HERO straight to the recipient.
 export async function executeChunk({ plan, i, privateKey, rpc = "https://mainnet.base.org", slippageBps = 100 }) {
   const account = privateKeyToAccount(privateKey);
-  const pub = createPublicClient({ chain: base, transport: http(rpc) });
-  const wc = createWalletClient({ account, chain: base, transport: http(rpc) });
+  const pub = createPublicClient({ chain: base, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
+  const wc = createWalletClient({ account, chain: base, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
   const chunk = plan.chunks[i];
   const amountIn = String(chunk.amountIn); // USDC base units (6dp), preformatted by the planner
   const route = await kyber(`/routes?tokenIn=${USDC}&tokenOut=${plan.tokenOut}&amountIn=${amountIn}`);
@@ -145,7 +145,7 @@ export async function executeChunk({ plan, i, privateKey, rpc = "https://mainnet
 }
 
 // The per-agent tick: read plans from memory, run at most ONE due chunk, checkpoint the outcome.
-export async function runTwapTick(mem, { privateKey, holdMin = 1_000_000, now = Date.now(), log = () => {} }) {
+export async function runTwapTick(mem, { privateKey, holdMin = 1_000_000, now = Date.now(), log = () => {}, rhRpc, baseRpc } = {}) {
   const entries = await mem.raw().catch(() => []);
   const { plans, runs, claims } = parseTwapPlans(entries);
   let acted = 0;
@@ -190,14 +190,21 @@ export async function runTwapTick(mem, { privateKey, holdMin = 1_000_000, now = 
     let rec;
     try {
       const exec = plan.route === "rh-eth" ? executeChunkRh : executeChunk;
-      const { tx, amountOut } = await exec({ plan, i: due.i, privateKey });
+      const opts = { plan, i: due.i, privateKey, ...(plan.route === "rh-eth" ? (rhRpc ? { rpc: rhRpc } : {}) : (baseRpc ? { rpc: baseRpc } : {})) };
+      const { tx, amountOut } = await exec(opts);
       rec = { planId: plan.planId, i: due.i, ok: true, tx, amountOut, at: new Date(now).toISOString() };
       log(`  ✓ chunk ${due.i + 1} → ${tx}`);
     } catch (e) {
       rec = { planId: plan.planId, i: due.i, ok: false, error: String(e.message).slice(0, 300), at: new Date(now).toISOString() };
       log(`  ✗ chunk ${due.i + 1}: ${e.message}`);
     }
-    await mem.append([{ role: "system", text: TWAPRUN_MARK + JSON.stringify(rec) }]);
+    // Record the outcome. If the swap SUCCEEDED, the money already moved — the twaprun:: MUST land,
+    // so retry it hard (a lost record would let the claim expire and re-buy). Failures retry too but
+    // matter less. The claim already guards against a double-fire within the TTL either way.
+    for (let a = 0; a < (rec.ok ? 6 : 2); a++) {
+      try { await mem.append([{ role: "system", text: TWAPRUN_MARK + JSON.stringify(rec) }]); break; }
+      catch (e) { log(`  · twaprun write retry ${a + 1}: ${String(e.message).slice(0, 60)}`); await new Promise((r) => setTimeout(r, 3000)); }
+    }
     acted++;
     break; // one chunk per tick, across all plans: pacing and blast-radius control
   }
