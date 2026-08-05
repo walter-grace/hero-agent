@@ -11,6 +11,7 @@
 import { WorkerMemory } from "./memory.mjs";
 import { runDue } from "../src/jobs.mjs";
 import { runTwapTick, parseTwapPlans, planComplete } from "./twap.mjs";
+import { pollKeeper } from "./keeper.mjs";
 
 // Tracing. Structured, content-free spans (timings, counts, model, cost — never prompt or result text,
 // which is encrypted). Emitted as one-line JSON so Cloudflare's Workers Observability (enabled in
@@ -107,8 +108,16 @@ async function tick(env, log = console.log, traceId) {
     }
   }
 
+  // 3) Backstop keeper for the on-chain HeroTwapKeeper (tier 3): execute any due permissionless
+  //    plans so they run even if no third-party bot shows up. Inert unless KEEPER_ADDRESS is set.
+  let keeper;
+  if (env.KEEPER_ADDRESS) {
+    try { keeper = await pollKeeper(env, { log }); if (keeper.executed) trace("keeper.exec", { executed: keeper.executed }); }
+    catch (e) { log(`keeper poll error: ${e.message}`); }
+  }
+
   trace("cron.tick", { serviced, errors, ms: Math.round(nowMs() - t0) });
-  return { serviced, errors, per };
+  return { serviced, errors, keeper, per };
 }
 
 export default {
