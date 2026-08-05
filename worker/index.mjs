@@ -10,7 +10,7 @@
 // Vars (wrangler.jsonc): AGENT_IDS ("3,6"), HERO_MEM_ADDR, RH_RPC, HERO_BASE.
 import { WorkerMemory } from "./memory.mjs";
 import { runDue } from "../src/jobs.mjs";
-import { runTwapTick } from "./twap.mjs";
+import { runTwapTick, parseTwapPlans, planComplete } from "./twap.mjs";
 
 // Tracing. Structured, content-free spans (timings, counts, model, cost — never prompt or result text,
 // which is encrypted). Emitted as one-line JSON so Cloudflare's Workers Observability (enabled in
@@ -51,35 +51,64 @@ function makeChat(env, trace) {
   };
 }
 
+// Service one agent: run its scheduled jobs (if a chat/HERO_RUN_KEY is available) and its durable
+// TWAP chunk, spending from `privateKey`. Returns the mem so the caller can check plan completion.
+async function serviceAgent(env, { agentId, privateKey, chat, trace, log }) {
+  const mem = new WorkerMemory({ agentId, privateKey, memAddr: env.HERO_MEM_ADDR, rpc: env.RH_RPC });
+  let jobs = { ran: 0, due: 0, defined: 0 };
+  if (chat) { jobs = await runDue(mem, { chat, onLog: (m) => log(`[agent ${agentId}] ${m}`), onSpan: (s) => trace(s.name, { agent: agentId, ...s }) }); }
+  try {
+    const tw = await runTwapTick(mem, { privateKey, holdMin: Number(env.HERO_TWAP_MIN ?? 1_000_000), rhRpc: env.RH_RPC, baseRpc: env.BASE_RPC, log: (m) => log(`[agent ${agentId}] ${m}`) });
+    if (tw.acted) trace("twap.chunk", { agent: agentId });
+  } catch (e) { log(`[agent ${agentId}] twap ERROR ${e.message}`); }
+  return { mem, jobs };
+}
+
 async function tick(env, log = console.log, traceId) {
   const trace = tracer(traceId || `tick-${Math.random().toString(36).slice(2, 10)}`);
   const t0 = nowMs();
-  const ids = String(env.AGENT_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!ids.length) { log("no AGENT_IDS configured — nothing to do"); return { agents: 0, ran: 0 }; }
-  if (!env.AGENT_PRIVATE_KEY) { log("missing AGENT_PRIVATE_KEY"); return { agents: 0, ran: 0, error: "missing key" }; }
-  // HERO_RUN_KEY is only needed to run scheduled LLM jobs; durable TWAP doesn't use it. Without it,
-  // skip jobs and still execute TWAP — so a TWAP-only worker needs just the wallet key.
-  const runJobs = !!env.HERO_RUN_KEY;
-  const chat = runJobs ? makeChat(env, trace) : null;
-  let ran = 0, due = 0, errors = 0;
+  const selfHosted = env.AGENT_PRIVATE_KEY && String(env.AGENT_IDS || "").trim();
+  const shared = env.REGISTRY_URL && env.WORKER_SECRET;
+  if (!selfHosted && !shared) { log("nothing configured (need AGENT_IDS+AGENT_PRIVATE_KEY, or REGISTRY_URL+WORKER_SECRET)"); return { serviced: 0 }; }
+  // HERO_RUN_KEY only powers scheduled LLM jobs; TWAP runs without it.
+  const chat = env.HERO_RUN_KEY ? makeChat(env, trace) : null;
+  let serviced = 0, errors = 0;
   const per = [];
-  for (const id of ids) {
-    try {
-      const mem = new WorkerMemory({ agentId: id, privateKey: env.AGENT_PRIVATE_KEY, memAddr: env.HERO_MEM_ADDR, rpc: env.RH_RPC });
-      let out = { ran: 0, due: 0, defined: 0 };
-      if (runJobs) { out = await runDue(mem, { chat, onLog: (m) => log(`[agent ${id}] ${m}`), onSpan: (s) => trace(s.name, { agent: id, ...s }) }); }
-      ran += out.ran; due += out.due; per.push({ agent: id, ...out });
-      if (runJobs) log(`[agent ${id}] ${out.ran}/${out.due} jobs ran (${out.defined} defined)`);
-      // Durable TWAP: if this agent's memory carries a twap:: plan, execute the next due chunk.
-      // Spends from the SAME key (the session/burner wallet the plan was created for).
-      try {
-        const tw = await runTwapTick(mem, { privateKey: env.AGENT_PRIVATE_KEY, holdMin: Number(env.HERO_TWAP_MIN ?? 1_000_000), rhRpc: env.RH_RPC, baseRpc: env.BASE_RPC, log: (m) => log(`[agent ${id}] ${m}`) });
-        if (tw.acted) { trace("twap.chunk", { agent: id }); per[per.length - 1].twap = tw; }
-      } catch (e) { log(`[agent ${id}] twap ERROR ${e.message}`); }
-    } catch (e) { errors++; log(`[agent ${id}] ERROR ${e.message}`); per.push({ agent: id, error: e.message }); trace("agent.error", { agent: id, message: e.message }); }
+
+  // 1) Self-hosted: agents you own, one operator key (AGENT_IDS + AGENT_PRIVATE_KEY).
+  if (selfHosted) {
+    for (const id of String(env.AGENT_IDS).split(",").map((s) => s.trim()).filter(Boolean)) {
+      try { const { jobs } = await serviceAgent(env, { agentId: id, privateKey: env.AGENT_PRIVATE_KEY, chat, trace, log }); serviced++; per.push({ agent: id, mode: "self", ...jobs }); }
+      catch (e) { errors++; log(`[agent ${id}] ERROR ${e.message}`); trace("agent.error", { agent: id, message: e.message }); }
+    }
   }
-  trace("cron.tick", { agents: ids.length, due, ran, errors, ms: Math.round(nowMs() - t0) });
-  return { agents: ids.length, ran, per };
+
+  // 2) Shared "run it for me": fetch every registered plan and run each with ITS OWN scoped session
+  //    key (never a shared key). Deregister a plan once every chunk is filled or it halted.
+  if (shared) {
+    let plans = [];
+    try {
+      const r = await fetch(`${env.REGISTRY_URL}/api/twap/active`, { headers: { Authorization: `Bearer ${env.WORKER_SECRET}` } });
+      const d = await r.json().catch(() => ({}));
+      plans = Array.isArray(d.plans) ? d.plans : [];
+      log(`registry: ${plans.length} shared plan(s)`);
+    } catch (e) { log(`registry fetch error: ${e.message}`); }
+    for (const p of plans) {
+      try {
+        const { mem } = await serviceAgent(env, { agentId: p.agentId, privateKey: p.sessionKey, chat: null, trace, log });
+        serviced++; per.push({ agent: p.agentId, mode: "shared" });
+        const { plans: pl, runs } = parseTwapPlans(await mem.raw().catch(() => []));
+        const plan = [...pl.values()][0];
+        if (plan && planComplete(plan, runs)) {
+          await fetch(`${env.REGISTRY_URL}/api/twap/done`, { method: "POST", headers: { Authorization: `Bearer ${env.WORKER_SECRET}`, "Content-Type": "application/json" }, body: JSON.stringify({ agentId: p.agentId }) }).catch(() => {});
+          log(`[agent ${p.agentId}] plan complete → deregistered`);
+        }
+      } catch (e) { errors++; log(`[shared agent ${p.agentId}] ERROR ${e.message}`); }
+    }
+  }
+
+  trace("cron.tick", { serviced, errors, ms: Math.round(nowMs() - t0) });
+  return { serviced, errors, per };
 }
 
 export default {

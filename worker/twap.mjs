@@ -75,6 +75,20 @@ export function nextDueChunk(plan, runs, now = Date.now()) {
   return null; // plan complete
 }
 
+// True when a plan needs no more execution: every chunk filled, or the plan halted/disabled. The
+// shared worker uses this to deregister a finished plan so it stops polling for it.
+export function planComplete(plan, runs) {
+  if (!plan || plan.enabled === false) return true;
+  const mine = (runs || []).filter((r) => r.planId === plan.planId);
+  for (let i = 0; i < (plan.chunks || []).length; i++) {
+    const attempts = mine.filter((r) => r.i === i);
+    if (attempts.some((r) => r.ok)) continue;                 // this chunk is filled
+    if (attempts.filter((r) => !r.ok).length >= 2) return true; // halted on this chunk
+    return false;                                             // still has a chunk to fill (now or later)
+  }
+  return true; // all chunks filled
+}
+
 async function kyber(path, init) {
   const r = await fetch(`${KYBER}${path}`, { ...init, headers: { ...KYBER_HEADERS, "Content-Type": "application/json", ...(init?.headers || {}) } });
   const d = await r.json().catch(() => ({}));
