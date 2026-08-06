@@ -96,6 +96,18 @@ async function kyber(path, init) {
   return d.data;
 }
 
+// Explicit local nonce, the same guard the /twap page's auto mode uses. viem auto-fills each tx's
+// nonce from getTransactionCount(pending), but even one provider load-balances across backend nodes
+// whose pending view can lag, so the swap right after an approve can read the pre-approve count and
+// reuse its nonce ("nonce too low"). Here that would record a spurious chunk failure and, after two,
+// halt a healthy plan. The session wallet sends sequentially, so read the nonce once and increment
+// locally, only after a successful broadcast (a rejected send, e.g. a reverted gas estimate, does not
+// consume a nonce, so it must not skip one either).
+async function nonceSender(pub, wc, address) {
+  let nonce = await pub.getTransactionCount({ address, blockTag: "pending" });
+  return async (args) => { const hash = await wc.sendTransaction({ ...args, nonce }); nonce += 1; return hash; };
+}
+
 // One chunk on Robinhood Chain: native ETH → token through our Uniswap v3 pool, quoted first, with
 // a hard slippage floor. The pool is THIN — the wide default slippage mirrors the /twap page, and
 // the amountOutMinimum still floors every fill so a manipulated pool fails the swap instead of
@@ -104,13 +116,14 @@ export async function executeChunkRh({ plan, i, privateKey, rpc = RH_CHAIN.rpcUr
   const account = privateKeyToAccount(privateKey);
   const pub = createPublicClient({ chain: RH_CHAIN, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
   const wc = createWalletClient({ account, chain: RH_CHAIN, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
+  const send = await nonceSender(pub, wc, account.address);
   const amountIn = BigInt(plan.chunks[i].amountIn); // wei
   const fee = plan.fee || 10000;
   const { result } = await pub.simulateContract({ account: account.address, address: RH_QUOTER, abi: RH_QUOTER_ABI, functionName: "quoteExactInputSingle", args: [{ tokenIn: RH_WETH, tokenOut: plan.tokenOut, amountIn, fee, sqrtPriceLimitX96: 0n }] });
   const out = result[0];
   const minOut = out - (out * BigInt(plan.slippageBps || slippageBps)) / 10000n;
   const data = encodeFunctionData({ abi: RH_ROUTER_ABI, functionName: "exactInputSingle", args: [{ tokenIn: RH_WETH, tokenOut: plan.tokenOut, fee, recipient: plan.recipient, amountIn, amountOutMinimum: minOut, sqrtPriceLimitX96: 0n }] });
-  const tx = await wc.sendTransaction({ to: RH_ROUTER, data, value: amountIn });
+  const tx = await send({ to: RH_ROUTER, data, value: amountIn });
   await pub.waitForTransactionReceipt({ hash: tx });
   return { tx, amountOut: out.toString() };
 }
@@ -120,6 +133,7 @@ export async function executeChunk({ plan, i, privateKey, rpc = "https://mainnet
   const account = privateKeyToAccount(privateKey);
   const pub = createPublicClient({ chain: base, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
   const wc = createWalletClient({ account, chain: base, transport: http(rpc, { retryCount: 8, retryDelay: 2000 }) });
+  const send = await nonceSender(pub, wc, account.address);
   const chunk = plan.chunks[i];
   const amountIn = String(chunk.amountIn); // USDC base units (6dp), preformatted by the planner
   const route = await kyber(`/routes?tokenIn=${USDC}&tokenOut=${plan.tokenOut}&amountIn=${amountIn}`);
@@ -134,7 +148,7 @@ export async function executeChunk({ plan, i, privateKey, rpc = "https://mainnet
   const current = await pub.readContract({ address: USDC, abi: ALLOW_ABI, functionName: "allowance", args: [account.address, built.routerAddress] }).catch(() => 0n);
   if (current < BigInt(amountIn)) {
     const allowanceData = `0x095ea7b3${built.routerAddress.slice(2).padStart(64, "0")}${BigInt(amountIn).toString(16).padStart(64, "0")}`;
-    const approveTx = await wc.sendTransaction({ to: USDC, data: allowanceData });
+    const approveTx = await send({ to: USDC, data: allowanceData });
     await pub.waitForTransactionReceipt({ hash: approveTx });
     // Public RPCs are load-balanced over replicas that can lag a block or two: the receipt being
     // in does NOT mean the next eth_call/estimateGas sees the new allowance. Poll until the
@@ -148,11 +162,11 @@ export async function executeChunk({ plan, i, privateKey, rpc = "https://mainnet
   // one bounded retry for the same replica-lag class of failure on the swap itself
   let tx;
   try {
-    tx = await wc.sendTransaction({ to: built.routerAddress, data: built.data, value: 0n });
+    tx = await send({ to: built.routerAddress, data: built.data, value: 0n });
   } catch (e) {
     if (!/TRANSFER_FROM_FAILED|transfer amount exceeds allowance/i.test(e.message || "")) throw e;
     await new Promise((r) => setTimeout(r, 5000));
-    tx = await wc.sendTransaction({ to: built.routerAddress, data: built.data, value: 0n });
+    tx = await send({ to: built.routerAddress, data: built.data, value: 0n });
   }
   await pub.waitForTransactionReceipt({ hash: tx });
   return { tx, amountOut: summary.amountOut };
