@@ -11,6 +11,7 @@
 import { WorkerMemory } from "./memory.mjs";
 import { runDue } from "../src/jobs.mjs";
 import { runTwapTick, parseTwapPlans, planComplete } from "./twap.mjs";
+import { runHeroModeTick } from "./heromode.mjs";
 import { pollKeeper } from "./keeper.mjs";
 
 // Tracing. Structured, content-free spans (timings, counts, model, cost — never prompt or result text,
@@ -62,7 +63,14 @@ async function serviceAgent(env, { agentId, privateKey, chat, trace, log }) {
     const tw = await runTwapTick(mem, { privateKey, holdMin: Number(env.HERO_TWAP_MIN ?? 1_000_000), rhRpc: env.RH_RPC, baseRpc: env.BASE_RPC, log: (m) => log(`[agent ${agentId}] ${m}`) });
     if (tw.acted) trace("twap.chunk", { agent: agentId });
   } catch (e) { log(`[agent ${agentId}] twap ERROR ${e.message}`); }
-  return { mem, jobs };
+  // Durable Hero Mode: drive one sealed-run step per tick, paid through this worker's HERO_RUN_KEY
+  // (a no-op without one, exactly like scheduled jobs).
+  let heromode = null;
+  try {
+    heromode = await runHeroModeTick(mem, { chat, log: (m) => log(`[agent ${agentId}] ${m}`) });
+    if (heromode?.acted) trace("heromode.step", { agent: agentId });
+  } catch (e) { log(`[agent ${agentId}] heromode ERROR ${e.message}`); }
+  return { mem, jobs, heromode };
 }
 
 async function tick(env, log = console.log, traceId) {
@@ -105,6 +113,30 @@ async function tick(env, log = console.log, traceId) {
           log(`[agent ${p.agentId}] plan complete → deregistered`);
         }
       } catch (e) { errors++; log(`[shared agent ${p.agentId}] ERROR ${e.message}`); }
+    }
+
+    // Shared durable Hero Mode runs: same registry pattern, but every step is a PAID inference
+    // call, so each run is driven with ITS OWN registered Hero Run key (the user's — never this
+    // worker's) alongside its own scoped session key. Deregister once the done marker is on-chain.
+    let hmRuns = [];
+    try {
+      const r = await fetch(`${env.REGISTRY_URL}/api/heromode/active`, { headers: { Authorization: `Bearer ${env.WORKER_SECRET}` } });
+      const d = await r.json().catch(() => ({}));
+      hmRuns = Array.isArray(d.runs) ? d.runs : [];
+      if (hmRuns.length) log(`registry: ${hmRuns.length} shared hero-mode run(s)`);
+    } catch (e) { log(`heromode registry fetch error: ${e.message}`); }
+    for (const p of hmRuns) {
+      try {
+        if (!p.apiKey) { log(`[hm agent ${p.agentId}] no Hero Run key registered — skipped`); continue; }
+        const mem = new WorkerMemory({ agentId: p.agentId, privateKey: p.sessionKey, memAddr: env.HERO_MEM_ADDR, rpc: env.RH_RPC });
+        const hm = await runHeroModeTick(mem, { chat: makeChat({ ...env, HERO_RUN_KEY: p.apiKey }, trace), log: (m) => log(`[hm agent ${p.agentId}] ${m}`) });
+        serviced++;
+        if (hm.acted) trace("heromode.step", { agent: p.agentId, mode: "shared" });
+        if (hm.allDone) {
+          await fetch(`${env.REGISTRY_URL}/api/heromode/done`, { method: "POST", headers: { Authorization: `Bearer ${env.WORKER_SECRET}`, "Content-Type": "application/json" }, body: JSON.stringify({ agentId: p.agentId }) }).catch(() => {});
+          log(`[hm agent ${p.agentId}] run finished → deregistered`);
+        }
+      } catch (e) { errors++; log(`[shared hm agent ${p.agentId}] ERROR ${e.message}`); }
     }
   }
 

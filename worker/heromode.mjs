@@ -1,0 +1,82 @@
+// Durable Hero Mode driver: continues a sealed research/build run from on-chain memory after the
+// tab is gone. The memory graph's "Run durably" panel seals the plan (`heromode::` entry) into a
+// burner-owned agent; this tick reads the log, derives the next unfilled step, runs ONE paid
+// inference call for it, and checkpoints the result back (`step::`). The chain is the state — kill
+// this worker and any other worker that can read the log resumes at the same gap.
+//
+// Same conservatism as the durable TWAP executor: one step per tick per agent (pacing), every
+// result on-chain, and fail-stop the run the moment a step errors twice — a failing step must never
+// burn $HERO every tick forever. Unlike TWAP there is no claim lease: a double-fired step costs one
+// wasted inference call and a duplicate `step::` entry that dedups by index, so the log self-heals.
+import { findTasks, completedSteps, nextAction, driveDurableStep, doneEntry, isMarkedDone } from "./hero-mode-durable.mjs";
+
+export const HM_FAIL_MARK = "heromodefail::"; // one per failed attempt; two on a step halts the run
+
+export function parseFails(entries) {
+  const out = [];
+  for (const e of entries || []) {
+    if (typeof e.text !== "string" || !e.text.startsWith(HM_FAIL_MARK)) continue;
+    try { const f = JSON.parse(e.text.slice(HM_FAIL_MARK.length)); if (Number.isInteger(f.index)) out.push(f); } catch {}
+  }
+  return out;
+}
+
+// A record that MUST land retries hard; the fail counter is what stops a run from spending forever,
+// so losing a fail write would let the next tick pay for the same broken step again.
+async function appendHard(mem, entries, log, tries = 3) {
+  for (let a = 0; a < tries; a++) {
+    try { await mem.append(entries); return true; }
+    catch (e) { log(`heromode write retry ${a + 1}: ${String(e.message).slice(0, 60)}`); await new Promise((r) => setTimeout(r, 3000)); }
+  }
+  return false;
+}
+
+// The per-agent tick: read the log, drive at most ONE step, checkpoint the outcome. `chat` is the
+// worker's Hero Run brain ({model, messages, maxTokens} -> {content}); without one there is nothing
+// to drive with, so the tick is a no-op. Returns allDone once the run's done marker is on-chain, so
+// the shared path knows when to deregister.
+export async function runHeroModeTick(mem, { chat, now = () => new Date().toISOString(), log = () => {} } = {}) {
+  if (!chat) return { tasks: 0, acted: 0, allDone: false };
+  const entries = await mem.raw().catch((e) => { log(`heromode: memory unreadable — ${String(e.message).slice(0, 80)}`); return null; });
+  if (!entries) return { tasks: 0, acted: 0, allDone: false };
+  const tasks = findTasks(entries);
+  if (!tasks.length) return { tasks: 0, acted: 0, allDone: false };
+  // The done marker is per-agent, and a durable agent carries exactly one run by construction, so a
+  // marked log means every run here is finished (complete or halted).
+  if (isMarkedDone(entries)) return { tasks: tasks.length, acted: 0, allDone: true };
+  const fails = parseFails(entries);
+  let acted = 0;
+  for (const { task } of tasks) {
+    const action = nextAction(task, completedSteps(entries));
+    // Fail-stop BEFORE spending: two recorded failures on the step we are about to run means the
+    // run halts, with the halt itself on-chain so every driver and the UI agree it is over.
+    if (action.kind === "step" && fails.filter((f) => f.index === action.index).length >= 2) {
+      log(`heromode ${task.runId}: step ${action.index + 1} failed twice — run halted.`);
+      await appendHard(mem, [doneEntry("failed", now())], log);
+      acted++;
+      break;
+    }
+    try {
+      const r = await driveDurableStep({
+        task, entries,
+        runModel: async ({ model, maxTokens, messages }) => {
+          const { content } = await chat({ model, messages, maxTokens });
+          if (!String(content || "").trim()) throw new Error("empty model response");
+          return content;
+        },
+        // The model call above already cost $HERO, so the step:: record MUST land: on RH's lagging
+        // RPCs a single append can transiently fail, and without a retry that wastes the paid call and
+        // (after two) spuriously halts a healthy run. Retry hard, exactly like the TWAP twaprun:: write.
+        checkpoint: async (es) => { if (!(await appendHard(mem, es, log))) throw new Error("checkpoint failed after retries"); },
+        now,
+      });
+      log(`heromode ${task.runId}: ${r.status}${r.index != null ? ` (step ${r.index + 1}/${r.total})` : ""}`);
+    } catch (e) {
+      log(`heromode ${task.runId}: step ${action.index + 1} error — ${String(e.message).slice(0, 200)}`);
+      await appendHard(mem, [{ role: "system", text: HM_FAIL_MARK + JSON.stringify({ runId: task.runId, index: action.index, error: String(e.message).slice(0, 300), at: now() }) }], log);
+    }
+    acted++;
+    break; // one step per tick, across all runs: pacing and blast-radius control
+  }
+  return { tasks: tasks.length, acted, allDone: false };
+}
