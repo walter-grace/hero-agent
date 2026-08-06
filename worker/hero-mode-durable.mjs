@@ -27,6 +27,18 @@ export const HM_DONE = "heromodedone::";
 
 export const HERO_MODE_MAX_STEPS = 12; // hard ceiling, mirrors the interactive Hero Mode cap
 
+// A step whose text starts with this marker is answered by a LIVE-SEARCH model instead of the run's
+// chosen model. That keeps the contract that makes this whole thing bounded and resumable — exactly
+// ONE paid call per step — while still letting a run reach today's web. A tool loop would have been
+// the obvious alternative and is the wrong shape here: it makes a step's cost unbounded and its
+// call count unpredictable, which the cron driver and the $HERO budget both depend on.
+// The marker lives inside the step's own text, so a sealed v1 plan needs no format change and older
+// plans keep working (nothing marked = nothing searched).
+export const HM_SEARCH = "[search]";
+export const HERO_SEARCH_MODEL = "perplexity/sonar-pro"; // same live-search model the Hero Agent uses
+export const needsSearch = (step) => String(step || "").trim().toLowerCase().startsWith(HM_SEARCH);
+export const stripSearchMark = (step) => String(step || "").trim().replace(/^\[search\]\s*/i, "");
+
 // Build the sealed plan object + the checkpoint entry that carries it. `plan` is the step list the
 // planning call produced. Bounds are clamped here so a bad input can never authorize an unbounded run
 // that the worker would then dutifully drive, one paid step at a time, forever.
@@ -129,10 +141,13 @@ export async function driveDurableStep({ task, entries, runModel, checkpoint, no
   }
   // One inference call for this step. A throw propagates to the caller, which should fail-stop the run
   // (a bounded worker must never spin on a failing step, burning $HERO every tick).
-  const result = await runModel({ model: task.model, maxTokens: task.maxTokens, messages: stepMessages(task, action) });
+  const at = now();
+  // A marked step overrides the run's model for that one call. Cost stays one call either way.
+  const model = needsSearch(action.step) ? HERO_SEARCH_MODEL : task.model;
+  const result = await runModel({ model, maxTokens: task.maxTokens, messages: stepMessages(task, action, at) });
   // Effect before we claim progress: the checkpoint is the record. If it throws, the step is simply
   // not recorded and the next tick re-derives the same gap and retries it. Idempotent by construction.
-  await checkpoint([stepEntry(action.index, result, now())]);
+  await checkpoint([stepEntry(action.index, result, at)]);
   const filled = done.length + 1;
   return { status: filled >= task.plan.length || filled >= task.maxSteps ? "final-step-done" : "stepped", index: action.index, filled, total: task.plan.length };
 }
@@ -186,7 +201,7 @@ export async function driveWithEventLog({ task, entries, events, appendEvent, ru
   const redo = wasStarted(events, action.index); // a prior intent with no on-chain result = a crash mid-step
   // WRITE-AHEAD: the intent is durable in the local log before anything executes.
   await appendEvent(intentEvent(action.index, { redo, at: now() }));
-  const result = await runModel({ model: task.model, maxTokens: task.maxTokens, messages: stepMessages(task, action) });
+  const result = await runModel({ model: needsSearch(action.step) ? HERO_SEARCH_MODEL : task.model, maxTokens: task.maxTokens, messages: stepMessages(task, action, now()) });
   // On-chain first (the authority), then the local result marker: if we crash between them, nextAction
   // still sees the step done on-chain next time, and the missing local marker is harmless metadata.
   await checkpoint([stepEntry(action.index, result, now())]);
@@ -198,10 +213,16 @@ export async function driveWithEventLog({ task, entries, events, appendEvent, ru
 // The prompt a harness sends to the model for one step. Kept here so the browser preview and the
 // worker send byte-identical instructions. Prior results are truncated so a long run's context can't
 // grow unbounded (which would blow the token budget and the checkpoint size).
-export function stepMessages(task, action) {
+// `nowIso` is passed in, never read here (this module stays clock-free so runs are deterministic to
+// test). Without it a model answers from its training cutoff and quietly produces stale work — the
+// single most common way a run looks confidently wrong.
+export function stepMessages(task, action, nowIso) {
   const prior = (action.priorResults || []).slice(-3).map((r, i) => `Earlier result ${i + 1}: ${String(r).slice(0, 700)}`).join("\n");
+  const search = needsSearch(action.step);
+  const today = nowIso ? String(nowIso).slice(0, 10) : null;
+  const dateLine = today ? `Today's date is ${today}. Treat anything you remember as potentially out of date, and say so when it matters.` : "";
   return [
-    { role: "system", content: "You are Hero, running one step of a durable research and build task. Do only this step. Be concrete and self-contained: your output is checkpointed on-chain and read by the next step." },
-    { role: "user", content: `Overall task: ${task.task}\n\n${prior ? prior + "\n\n" : ""}Now do step ${action.index + 1} of ${task.plan.length}: ${action.step}` },
+    { role: "system", content: `You are Hero, running one step of a durable research and build task. Do only this step. Be concrete and self-contained: your output is checkpointed on-chain and read by the next step.${dateLine ? " " + dateLine : ""}${search ? " This step needs CURRENT information: search the live web, and cite what you found with dates and sources." : ""}` },
+    { role: "user", content: `Overall task: ${task.task}\n\n${prior ? prior + "\n\n" : ""}Now do step ${action.index + 1} of ${task.plan.length}: ${stripSearchMark(action.step)}` },
   ];
 }
