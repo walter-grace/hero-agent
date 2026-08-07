@@ -42,7 +42,7 @@ export const stripSearchMark = (step) => String(step || "").trim().replace(/^\[s
 // Build the sealed plan object + the checkpoint entry that carries it. `plan` is the step list the
 // planning call produced. Bounds are clamped here so a bad input can never authorize an unbounded run
 // that the worker would then dutifully drive, one paid step at a time, forever.
-export function buildDurableTask({ runId, agentId, task, model = "auto", maxTokens = 700, maxSteps = 6, plan = [], createdAt }) {
+export function buildDurableTask({ runId, agentId, task, model = "auto", maxTokens = 700, maxSteps = 6, plan = [], tools = [], createdAt }) {
   const steps = (Array.isArray(plan) ? plan : []).map((s) => String(s || "").trim()).filter(Boolean);
   const cap = Math.max(1, Math.min(Number(maxSteps) || 6, HERO_MODE_MAX_STEPS, steps.length || HERO_MODE_MAX_STEPS));
   const t = {
@@ -54,9 +54,34 @@ export function buildDurableTask({ runId, agentId, task, model = "auto", maxToke
     maxTokens: Math.max(64, Math.min(Number(maxTokens) || 700, 4096)),
     maxSteps: cap,
     plan: steps.slice(0, cap),
+    // Tools the cloud worker may use for this run. Sealed WITH the plan on purpose: the worker reads
+    // the plan off-chain and must not be able to acquire capabilities the owner did not approve.
+    //
+    // ⚠️ A token here is written INTO the checkpoint. The checkpoint is encrypted and only the owning
+    // wallet can read it, but it is also permanent and on a public chain: it cannot be deleted, and a
+    // key that leaks later exposes it retroactively. Keyless servers carry no token and have none of
+    // that exposure, which is why they are the default and a token is strictly opt-in per server.
+    tools: sanitizeTools(tools),
     createdAt: createdAt || null, // stamped by the caller (this module never reads the clock)
   };
   return { task: t, entry: { role: "system", text: HM_PLAN + JSON.stringify(t) } };
+}
+
+// Normalise the tool list a run is allowed to use. Everything is clamped here rather than trusted
+// from the caller, because this is what authorises a worker to spend money and reach the network.
+export function sanitizeTools(tools) {
+  return (Array.isArray(tools) ? tools : [])
+    .map((t) => ({
+      id: String(t?.id || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 32),
+      name: String(t?.name || "").slice(0, 40),
+      url: String(t?.url || "").slice(0, 300),
+      // Only ever an allowlist: a server with no allowed tools contributes nothing, so a stale entry
+      // fails closed instead of exposing whatever that server happens to offer today.
+      allowed: (Array.isArray(t?.allowed) ? t.allowed : []).map((x) => String(x).slice(0, 64)).slice(0, 24),
+      ...(t?.token ? { token: String(t.token).slice(0, 400) } : {}),
+    }))
+    .filter((t) => t.id && /^https:\/\//.test(t.url) && t.allowed.length)
+    .slice(0, 4); // a run with a dozen servers is a runaway bill, not a feature
 }
 
 // Parse the plan back out of a checkpoint entry. Returns null for anything that isn't a heromode plan.

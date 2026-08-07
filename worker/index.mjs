@@ -26,12 +26,12 @@ function tracer(traceId) {
 // The brain: one chat completion through Hero Run's OpenAI-compatible /v1, paid in $HERO. Emits an
 // llm.call span with latency, token usage, resolved model, and $HERO charged when a tracer is given.
 function makeChat(env, trace) {
-  return async ({ model = "auto", messages, maxTokens = 600 }) => {
+  return async ({ model = "auto", messages, maxTokens = 600, tools = null, tool_choice = null }) => {
     const t0 = nowMs();
     const r = await fetch(`${env.HERO_BASE || "https://herorunai.com"}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.HERO_RUN_KEY}` },
-      body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+      body: JSON.stringify({ model, messages, max_tokens: maxTokens, ...(tools?.length ? { tools, tool_choice: tool_choice || "auto" } : {}) }),
     });
     const d = await r.json().catch(() => ({}));
     const ms = Math.round(nowMs() - t0);
@@ -49,7 +49,9 @@ function makeChat(env, trace) {
       "gen_ai.usage.output_tokens": d.usage?.completion_tokens ?? null,
       charged_hero: hero.charged_hero ?? null,
     });
-    return { content: d.choices?.[0]?.message?.content || "" };
+    // `message` carries tool_calls; `content` is kept so every existing caller is untouched.
+    const message = d.choices?.[0]?.message || {};
+    return { content: message.content || "", message };
   };
 }
 

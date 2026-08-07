@@ -9,6 +9,7 @@
 // burn $HERO every tick forever. Unlike TWAP there is no claim lease: a double-fired step costs one
 // wasted inference call and a duplicate `step::` entry that dedups by index, so the log self-heals.
 import { findTasks, completedSteps, nextAction, driveDurableStep, doneEntry, isMarkedDone } from "./hero-mode-durable.mjs";
+import { loadPlanTools, runStepWithTools, TOOL_SAFETY_NOTE } from "./mcp-tools.mjs";
 
 export const HM_FAIL_MARK = "heromodefail::"; // one per failed attempt; two on a step halts the run
 
@@ -46,7 +47,11 @@ export async function runHeroModeTick(mem, { chat, now = () => new Date().toISOS
   if (isMarkedDone(entries)) return { tasks: tasks.length, acted: 0, allDone: true };
   const fails = parseFails(entries);
   let acted = 0;
+  // Connected MCP servers for the run currently being driven. null = not attempted yet, [] = tried
+  // and none usable. Scoped per task inside the loop so one run's servers never leak into another's.
+  let live = null;
   for (const { task } of tasks) {
+    live = null;
     const action = nextAction(task, completedSteps(entries));
     // Fail-stop BEFORE spending: two recorded failures on the step we are about to run means the
     // run halts, with the halt itself on-chain so every driver and the UI agree it is over.
@@ -56,10 +61,30 @@ export async function runHeroModeTick(mem, { chat, now = () => new Date().toISOS
       acted++;
       break;
     }
+    // Connect the plan's approved servers once, lazily, and only if the plan named any. A plan with
+    // no tools behaves exactly as before: one paid call per step, no network beyond the model.
+    if (task.tools?.length && live === null) {
+      live = await loadPlanTools(task.tools, (m) => log(`heromode ${task.runId}: ${m}`));
+    }
     try {
       const r = await driveDurableStep({
         task, entries,
         runModel: async ({ model, maxTokens, messages }) => {
+          if (live?.length) {
+            // Tell the model it has tools, and that their output is untrusted, without touching the
+            // shared stepMessages() contract the browser also builds from.
+            const withTools = messages.map((m, i) => (i === 0 && m.role === "system"
+              ? { ...m, content: `${m.content} You have tools connected; use them when this step needs facts you do not reliably know. ${TOOL_SAFETY_NOTE}` }
+              : m));
+            const { content, toolTrace } = await runStepWithTools({
+              chatRaw: async (a) => (await chat(a)).message,
+              model, maxTokens, messages: withTools, live,
+              log: (m) => log(`heromode ${task.runId}: ${m}`),
+            });
+            if (!String(content || "").trim()) throw new Error("empty model response");
+            if (toolTrace.length) log(`heromode ${task.runId}: step used ${toolTrace.length} tool call(s)`);
+            return content;
+          }
           const { content } = await chat({ model, messages, maxTokens });
           if (!String(content || "").trim()) throw new Error("empty model response");
           return content;
