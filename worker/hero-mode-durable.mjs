@@ -132,9 +132,17 @@ export function stepEntry(index, result, at) {
   return { role: "agent", text: HM_STEP + JSON.stringify({ index: Number(index), result: String(result || "").slice(0, 6000), at: at || null }) };
 }
 
-// The entry a harness writes once when the run is finished (or fails). `at` is passed in.
+// The entry a harness writes once when the run is finished, fails, or is cancelled. `at` is passed in.
+//
+// "cancelled" exists so stopping a run tells the truth. Cancelling IS writing this marker: the worker
+// treats any done marker as terminal and deregisters the run on its next tick, so an owner can halt
+// their own run with a checkpoint they are already entitled to write, and no new authority is needed
+// anywhere. Recording it as "complete" would have made a stopped run indistinguishable from a
+// finished one, forever, in a log that cannot be edited.
+const DONE_STATUSES = new Set(["complete", "failed", "cancelled"]);
 export function doneEntry(status, at) {
-  return { role: "system", text: HM_DONE + JSON.stringify({ status: status === "failed" ? "failed" : "complete", at: at || null }) };
+  const st = DONE_STATUSES.has(status) ? status : "complete";
+  return { role: "system", text: HM_DONE + JSON.stringify({ status: st, at: at || null }) };
 }
 
 // Every durable run present in an agent's checkpoint log, with its derived progress. Usually one, but
@@ -148,6 +156,42 @@ export function findTasks(entries) {
   const done = completedSteps(entries);
   const marked = isMarkedDone(entries);
   return tasks.map((task) => ({ task, done, isDone: marked || nextAction(task, done).kind === "done" }));
+}
+
+// What a run looks like right now, for a human. Derived entirely from the log, like everything else
+// here, so it needs no stored state and cannot disagree with what the worker will do next.
+//
+// `staleMs` is what separates "running" from "stalled". A durable run advances one step per cron
+// tick, so silence is only meaningful in multiples of that tick: the default allows three missed
+// ticks of a */5 cron before calling it stalled, which is long enough to absorb a slow model or a
+// laggy RPC and short enough to notice within a coffee break.
+//
+// A stalled run is the failure that would otherwise be invisible. The loud failures already write a
+// marker: two step errors write status "failed". The quiet ones cannot — a session wallet out of gas
+// cannot even afford the checkpoint that would record its own death — so they can only ever be
+// detected by absence, which is exactly what this measures.
+export function runStatus(entries, { now = Date.now(), staleMs = 15 * 60_000 } = {}) {
+  const out = [];
+  const done = completedSteps(entries);
+  const marker = (entries || []).find((e) => typeof e?.text === "string" && e.text.startsWith(HM_DONE));
+  let finished = null;
+  if (marker) { try { finished = JSON.parse(marker.text.slice(HM_DONE.length)); } catch { finished = { status: "complete" }; } }
+
+  for (const e of entries || []) {
+    const task = parseDurableTask(e);
+    if (!task) continue;
+    const total = (task.plan || []).length;
+    const completed = done.length;
+    // Newest timestamp anywhere in this run, so "quiet for how long" survives out-of-order writes.
+    const stamps = [task.createdAt, ...done.map((d) => d.at), finished?.at].map((t) => Date.parse(t || "")).filter((n) => Number.isFinite(n));
+    const lastAt = stamps.length ? Math.max(...stamps) : null;
+    const quietMs = lastAt ? Math.max(0, now - lastAt) : null;
+    const state = finished
+      ? (finished.status === "failed" ? "failed" : finished.status === "cancelled" ? "cancelled" : "complete")
+      : (quietMs != null && quietMs > staleMs ? "stalled" : "running");
+    out.push({ runId: task.runId, agentId: task.agentId, task: task.task, state, completed, total, lastAt, quietMs, tools: (task.tools || []).map((t) => t.name) });
+  }
+  return out;
 }
 
 // Drive EXACTLY ONE step of a run, then stop. This is the whole harness contract: no loop, no retry

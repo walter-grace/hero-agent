@@ -61,15 +61,16 @@ export async function runHeroModeTick(mem, { chat, now = () => new Date().toISOS
       acted++;
       break;
     }
-    // Connect the plan's approved servers once, lazily, and only if the plan named any. A plan with
-    // no tools behaves exactly as before: one paid call per step, no network beyond the model.
-    if (task.tools?.length && live === null) {
-      live = await loadPlanTools(task.tools, (m) => log(`heromode ${task.runId}: ${m}`));
-    }
     try {
       const r = await driveDurableStep({
         task, entries,
         runModel: async ({ model, maxTokens, messages }) => {
+          // Connect lazily, HERE, rather than once per tick: driveDurableStep only calls runModel
+          // when there is actually a step to run, so a tick that just writes the done marker no
+          // longer opens a pointless MCP session. Cached per task so multiple steps reuse it.
+          if (task.tools?.length && live === null) {
+            live = await loadPlanTools(task.tools, (m) => log(`heromode ${task.runId}: ${m}`));
+          }
           if (live?.length) {
             // Tell the model it has tools, and that their output is untrusted, without touching the
             // shared stepMessages() contract the browser also builds from.
