@@ -12,6 +12,7 @@ import { WorkerMemory } from "./memory.mjs";
 import { runDue } from "../src/jobs.mjs";
 import { runTwapTick, parseTwapPlans, planComplete } from "./twap.mjs";
 import { runHeroModeTick } from "./heromode.mjs";
+import { runSwarmTick } from "./swarm.mjs";
 import { pollKeeper } from "./keeper.mjs";
 
 // Tracing. Structured, content-free spans (timings, counts, model, cost — never prompt or result text,
@@ -72,7 +73,45 @@ async function serviceAgent(env, { agentId, privateKey, chat, trace, log }) {
     heromode = await runHeroModeTick(mem, { chat, log: (m) => log(`[agent ${agentId}] ${m}`) });
     if (heromode?.acted) trace("heromode.step", { agent: agentId });
   } catch (e) { log(`[agent ${agentId}] heromode ERROR ${e.message}`); }
+  // Swarm lane: if this agent holds an unanswered task:: brief, execute it (one paid call) and
+  // record the handoff:: that swarm_collect reads. Errors are logged, not rethrown — the attempt
+  // marker is already on-chain, so the cap still counts a crashed try.
+  try {
+    const sw = await runSwarmTick(mem, { chat, log: (m) => log(`[agent ${agentId}] ${m}`) });
+    if (sw?.acted) trace("swarm.step", { agent: agentId, reason: sw.reason });
+  } catch (e) { log(`[agent ${agentId}] swarm ERROR ${e.message}`); }
   return { mem, jobs, heromode };
+}
+
+// Agents owned by the operator wallet, read from the chain. AGENT_IDS alone cannot serve a swarm:
+// swarm_spawn mints new agents at runtime, and nobody is going to redeploy the worker with a new
+// env var every time a swarm spins up. NOT via eth_getLogs — Robinhood Chain caps the range and
+// returns EMPTY rather than erroring, which reads as "no agents" (that bug has bitten twice now).
+// nextId() bounds the walk; ownerOf() is authoritative.
+async function discoverOwnedAgents(env, address) {
+  const rpc = env.RH_RPC || "https://rpc.mainnet.chain.robinhood.com";
+  const memAddr = env.HERO_MEM_ADDR || "0xce4dc968827a996f7bd5bbdb0fcb72348b18d0dc";
+  const call = async (data) => {
+    const r = await fetch(rpc, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: memAddr, data }, "latest"] }),
+    });
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message);
+    return j.result;
+  };
+  const total = Number(BigInt(await call("0x61b8ce8c"))) - 1; // nextId()
+  const want = address.toLowerCase();
+  const owned = [];
+  for (let start = 1; start <= total; start += 10) {
+    const batch = [];
+    for (let id = start; id < Math.min(start + 10, total + 1); id++) {
+      batch.push(call("0x6352211e" + BigInt(id).toString(16).padStart(64, "0")) // ownerOf(id)
+        .then((r) => ("0x" + r.slice(-40) === want ? id : null)).catch(() => null));
+    }
+    owned.push(...(await Promise.all(batch)).filter((x) => x !== null));
+  }
+  return owned;
 }
 
 async function tick(env, log = console.log, traceId) {
@@ -88,7 +127,23 @@ async function tick(env, log = console.log, traceId) {
 
   // 1) Self-hosted: agents you own, one operator key (AGENT_IDS + AGENT_PRIVATE_KEY).
   if (selfHosted) {
-    for (const id of String(env.AGENT_IDS).split(",").map((s) => s.trim()).filter(Boolean)) {
+    let ids = String(env.AGENT_IDS).split(",").map((s) => s.trim()).filter(Boolean);
+    // AGENT_DISCOVER=1 additionally services every agent the operator wallet owns on-chain — the
+    // switch that makes swarms autonomous, since swarm_spawn mints agents no env var knows about.
+    // OPT-IN because it changes what this worker spends money on: with it, minting an agent IS
+    // enrolling it. Never replaces AGENT_IDS (a transferred-away agent should still stop, and the
+    // env list is the operator's explicit floor).
+    if (env.AGENT_DISCOVER === "1") {
+      try {
+        const { privateKeyToAccount } = await import("viem/accounts");
+        const addr = privateKeyToAccount(env.AGENT_PRIVATE_KEY.startsWith("0x") ? env.AGENT_PRIVATE_KEY : "0x" + env.AGENT_PRIVATE_KEY).address;
+        const found = await discoverOwnedAgents(env, addr);
+        const merged = [...new Set([...ids.map(Number), ...found])].sort((a, b) => a - b);
+        if (merged.length !== ids.length) log(`discovery: +${merged.length - ids.length} agent(s) beyond AGENT_IDS`);
+        ids = merged.map(String);
+      } catch (e) { log(`discovery ERROR ${e.message} — continuing with AGENT_IDS only`); }
+    }
+    for (const id of ids) {
       try { const { jobs } = await serviceAgent(env, { agentId: id, privateKey: env.AGENT_PRIVATE_KEY, chat, trace, log }); serviced++; per.push({ agent: id, mode: "self", ...jobs }); }
       catch (e) { errors++; log(`[agent ${id}] ERROR ${e.message}`); trace("agent.error", { agent: id, message: e.message }); }
     }

@@ -13,6 +13,10 @@
     // Agents this cron runs. Must be owned by AGENT_PRIVATE_KEY's wallet (memory is owner-key-encrypted).
     // Set to your test agent; comma-separate to run several, e.g. "3,4,6".
     "AGENT_IDS": "10",
+    // Also service every agent the operator wallet owns on-chain, discovered per tick. This is what
+    // makes swarms autonomous: swarm_spawn mints agents at runtime, and nobody redeploys the worker
+    // per swarm. Opt-in on purpose — with it on, minting an agent IS enrolling it in the cron.
+    "AGENT_DISCOVER": "1",
     "HERO_MEM_ADDR": "0xce4dc968827a996f7bd5bbdb0fcb72348b18d0dc",
     "HERO_BASE": "https://herorunai.com",
     // Shared "run it for me" mode: the worker pulls every registered plan from here and runs each

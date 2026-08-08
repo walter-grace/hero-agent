@@ -91,8 +91,27 @@ export class WorkerMemory {
     return out;
   }
   async raw() { return (await this._all()).filter((e) => !(e.role === "agent" && String(e.text).startsWith(ROOT_MARK))); }
-  async append(entries) {
+  // The nonce is re-read (`pending`) immediately before every send, never trusted from viem's
+  // cache. One tick services MANY agents with the SAME operator wallet, and each WorkerMemory is a
+  // fresh client, so the second agent's first append sees whatever the replica remembers — measured
+  // "nonce too low: tx 37, state 38" the moment two lanes appended in one tick. The retry is safe
+  // for a NONCE error specifically: "nonce too low" means this signed tx never entered the pool, so
+  // re-signing with a fresh nonce cannot double-apply it. Other errors still throw — resending a tx
+  // that may have been ACCEPTED is how checkpoints get written twice.
+  async append(entries, tries = 3) {
     const data = toHex(await this._seal(entries));
-    return this.wallet.sendTransaction({ to: this.memAddr, data: encodeFunctionData({ abi: ABI, functionName: "checkpoint", args: [this.agentId, data] }) });
+    const call = encodeFunctionData({ abi: ABI, functionName: "checkpoint", args: [this.agentId, data] });
+    let lastErr;
+    for (let i = 0; i < tries; i++) {
+      try {
+        const nonce = await this.pub.getTransactionCount({ address: this.account.address, blockTag: "pending" });
+        return await this.wallet.sendTransaction({ to: this.memAddr, data: call, nonce });
+      } catch (e) {
+        lastErr = e;
+        if (!/nonce/i.test(e?.message || "")) throw e;
+        await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+      }
+    }
+    throw lastErr;
   }
 }
