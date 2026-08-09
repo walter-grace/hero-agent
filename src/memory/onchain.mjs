@@ -94,6 +94,16 @@ export class OnchainMemory {
     const at = Array.isArray(doc) ? undefined : doc.at;
     return at ? entries.map((e) => ({ at, ...e })) : entries;
   }
+  // PUBLIC append: marker-0 gzip, no encryption. The multiplayer channel — any wallet the owner
+  // has approved on the NFT can write these, and ANYONE (hero-sdk publicEntries, other members on
+  // other wallets, the world) can read them without a key. Private entries stay marker-2 and
+  // owner-only; a room chooses its visibility per entry, not per agent.
+  async appendPublic(entries) {
+    const gz = gzipSync(Buffer.from(JSON.stringify({ v: 1, at: new Date().toISOString(), entries })));
+    const data = toHex(Buffer.concat([Buffer.from([0]), gz]));
+    const call = encodeFunctionData({ abi: ABI, functionName: "checkpoint", args: [this.agentId, data] });
+    return this.wallet.sendTransaction({ to: MEM_ADDR, data: call });
+  }
   async append(entries) {
     const data = toHex(await this._seal(entries));
     const call = encodeFunctionData({ abi: ABI, functionName: "checkpoint", args: [this.agentId, data] });
