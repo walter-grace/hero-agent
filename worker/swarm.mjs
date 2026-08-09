@@ -73,7 +73,7 @@ export async function runSwarmTick(mem, { chat, log = () => {} } = {}) {
   if (!answer) throw new Error("model returned nothing"); // caught by serviceAgent; the strike above still counts
   // JSON handoff so the cost travels WITH the result. Readers accept both shapes: this JSON and the
   // legacy bare string — a format change must never make old handoffs unreadable.
-  await mem.append([{ role: "agent", text: HANDOFF_MARK + JSON.stringify({ text: answer, spentHero: res?.charged ?? null, at: new Date().toISOString() }) }]);
+  await mem.append([{ role: "agent", text: HANDOFF_MARK + JSON.stringify({ text: answer, spentHero: res?.charged ?? null, tokIn: res?.tokIn ?? null, tokOut: res?.tokOut ?? null, at: new Date().toISOString() }) }]);
   log(`swarm: handed off ${answer.length} chars${swarm ? ` (swarm "${swarm}")` : ""}`);
   return { acted: true, done: true, reason: "handed off" };
 }

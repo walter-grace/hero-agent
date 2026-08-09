@@ -54,7 +54,8 @@ function makeChat(env, trace) {
     // `charged` is what this call cost in $HERO — callers that write checkpoints should record it,
     // because a cost that is not written into the entry at pay time is unknowable later.
     const message = d.choices?.[0]?.message || {};
-    return { content: message.content || "", message, charged: Number(hero.charged_hero) || null };
+    return { content: message.content || "", message, charged: Number(hero.charged_hero) || null,
+      tokIn: Number(d.usage?.prompt_tokens) || null, tokOut: Number(d.usage?.completion_tokens) || null };
   };
 }
 

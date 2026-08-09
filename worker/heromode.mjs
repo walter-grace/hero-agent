@@ -88,9 +88,9 @@ export async function runHeroModeTick(mem, { chat, now = () => new Date().toISOS
             // honest null beats a partial number presented as the total.
             return { text: content, spentHero: null };
           }
-          const { content, charged } = await chat({ model, messages, maxTokens });
+          const { content, charged, tokIn, tokOut } = await chat({ model, messages, maxTokens });
           if (!String(content || "").trim()) throw new Error("empty model response");
-          return { text: content, spentHero: charged ?? null };
+          return { text: content, spentHero: charged ?? null, tokIn: tokIn ?? null, tokOut: tokOut ?? null };
         },
         // The model call above already cost $HERO, so the step:: record MUST land: on RH's lagging
         // RPCs a single append can transiently fail, and without a retry that wastes the paid call and
