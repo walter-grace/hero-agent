@@ -8,6 +8,7 @@
 // This mirrors the browser SDK the herorunai.com/agent page uses (lib/agent-memory.js), ported to
 // Node. Reads walk the contract's checkpoint events; writes are one transaction each (~$0.003).
 import { gzipSync, gunzipSync } from "node:zlib";
+import { ROOM_MARK, sealRoom, openRoom } from "./room.mjs";
 import { keccak256, toBytes, toHex, encodePacked, encodeFunctionData, createWalletClient, createPublicClient, http, defineChain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
@@ -29,7 +30,7 @@ const ABI = [
 const rhChain = defineChain({ id: 4663, name: "Robinhood Chain", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [RH_RPC] } } });
 
 export class OnchainMemory {
-  constructor({ agentId, privateKey = process.env.AGENT_PRIVATE_KEY }) {
+  constructor({ agentId, privateKey = process.env.AGENT_PRIVATE_KEY, roomKey = null }) {
     if (!privateKey) throw new Error("On-chain memory needs AGENT_PRIVATE_KEY (a wallet with a little RH gas).");
     if (agentId == null) throw new Error("On-chain memory needs an agentId (mint one first).");
     this.agentId = BigInt(agentId);
@@ -38,6 +39,10 @@ export class OnchainMemory {
     this.pub = createPublicClient({ chain: rhChain, transport: http(RH_RPC) });
     this._key = null;
     this._keyV1 = null;
+    // Group-private rooms: when set (32 bytes recovered from an on-chain roomkey:: wrap), marker-3
+    // blobs open and appendRoom() can write them. Without it, room entries read as sealed — which
+    // is exactly what a non-member should see.
+    this.roomKey = roomKey;
   }
   async _cryptoKey() {
     if (this._key) return this._key;
@@ -76,6 +81,11 @@ export class OnchainMemory {
     const { webcrypto } = await import("node:crypto");
     let doc;
     if (blob[0] === 0) doc = JSON.parse(gunzipSync(Buffer.from(blob.subarray(1))).toString()); // plaintext gzip
+    else if (blob[0] === ROOM_MARK) {
+      if (!this.roomKey) throw new Error("sealed"); // a non-member sees room entries as sealed, correctly
+      doc = JSON.parse(gunzipSync(openRoom(this.roomKey, Buffer.from(blob))).toString());
+      doc.__room = true; // room-shared, as opposed to the owner's private entries
+    }
     else if (blob[0] !== 2) throw new Error("sealed"); // passphrase-encrypted (1) or unknown marker
     else {
       const iv = blob.subarray(1, 13), ct = blob.subarray(13);
@@ -92,12 +102,22 @@ export class OnchainMemory {
     // bare arrays. Carry `at` onto each entry when the envelope provides it.
     const entries = Array.isArray(doc) ? doc : (doc.entries || []);
     const at = Array.isArray(doc) ? undefined : doc.at;
-    return at ? entries.map((e) => ({ at, ...e })) : entries;
+    const room = !Array.isArray(doc) && doc.__room ? { room: true } : null;
+    return entries.map((e) => ({ ...(at ? { at } : {}), ...(room || {}), ...e }));
   }
   // PUBLIC append: marker-0 gzip, no encryption. The multiplayer channel — any wallet the owner
   // has approved on the NFT can write these, and ANYONE (hero-sdk publicEntries, other members on
   // other wallets, the world) can read them without a key. Private entries stay marker-2 and
   // owner-only; a room chooses its visibility per entry, not per agent.
+  // ROOM append: marker-3, encrypted with the shared room key. Only members (holders of a
+  // roomkey:: wrap) can read these; the contract's approval still gates the write itself.
+  async appendRoom(entries) {
+    if (!this.roomKey) throw new Error("No room key — recover it from your roomkey:: wrap first.");
+    const gz = gzipSync(Buffer.from(JSON.stringify({ v: 1, at: new Date().toISOString(), entries })));
+    const data = toHex(sealRoom(this.roomKey, gz));
+    const call = encodeFunctionData({ abi: ABI, functionName: "checkpoint", args: [this.agentId, data] });
+    return this.wallet.sendTransaction({ to: MEM_ADDR, data: call });
+  }
   async appendPublic(entries) {
     const gz = gzipSync(Buffer.from(JSON.stringify({ v: 1, at: new Date().toISOString(), entries })));
     const data = toHex(Buffer.concat([Buffer.from([0]), gz]));
