@@ -1,23 +1,25 @@
-// Swarm tick: make spawned workers execute THEMSELVES.
+// Swarm tick: make spawned workers execute THEMSELVES — now MULTI-TASK.
 //
-// swarm_spawn (hero-run-mcp) mints one agent per slice of work and seeds it with a `task::` entry.
-// Without this file the harness that spawned them still has to drive every worker by hand, which
-// makes the swarm a to-do list rather than a workforce. This lane closes the loop: each cron tick,
-// an agent holding an unanswered task runs it — one paid inference call — and records the result as
-// the `handoff::` entry swarm_collect already reads.
+// Originally one task per agent (swarm_spawn mints an agent per slice). Council "Broadcast to
+// memory" changed the shape: it pools SEVERAL task:: entries on one agent, so the lane now works
+// through ALL of them — one task per tick (pacing unchanged), each matched to its handoff by task
+// index, progress derived from the log exactly like durable Hero Mode derives steps. No cursor,
+// no state: kill the worker anywhere and the next tick re-derives the same gap.
 //
-// Deliberately NO claim lease, following the Hero Mode precedent rather than TWAP's: a double-fired
-// step here costs one duplicate inference call, not a duplicate swap, and the lease itself would be
-// an extra transaction per step. What it DOES have that Hero Mode lacks is an attempt cap, because
-// the failure mode is different: a task can be impossible (bad brief, model refusal), and an
-// impossible task with no cap is a 288-calls-a-day leak from the operator's key until someone
-// notices. Three strikes, then a FAILED handoff so the swarm terminates visibly instead of burning.
+// Compatibility: legacy single-task agents have a handoff:: with no taskIndex — that matches the
+// only task they have. New handoffs carry {taskIndex} so N tasks and N handoffs pair up.
+//
+// Still no claim lease (a double-fired step costs one duplicate inference call), still a 3-attempt
+// cap PER TASK ending in a visible FAILED handoff — an impossible task must not starve the rest of
+// the pool, so the cap moves the lane to the next task instead of stopping the agent.
 
 const TASK_MARK = "task::";
 const HANDOFF_MARK = "handoff::";
 const TRY_MARK = "swarmtry::";
 
 const MAX_ATTEMPTS = 3;
+
+const parse = (e, mark) => { try { return JSON.parse(String(e.text).slice(mark.length)); } catch { return null; } };
 
 /**
  * One swarm step for one agent, at most one paid call.
@@ -27,33 +29,54 @@ export async function runSwarmTick(mem, { chat, log = () => {} } = {}) {
   if (!chat) return { acted: false, reason: "no HERO_RUN_KEY" }; // same no-op rule as scheduled jobs
 
   const entries = await mem.raw();
-  const task = entries.filter((e) => String(e.text || "").startsWith(TASK_MARK)).pop();
-  if (!task) return { acted: false, reason: "no task" };
-  // Any handoff means this worker already reported — a swarm worker carries exactly one brief.
-  if (entries.some((e) => String(e.text || "").startsWith(HANDOFF_MARK))) {
-    return { acted: false, done: true, reason: "already handed off" };
+  // All tasks, by index. Entries without an index (hand-written) get their position in arrival order.
+  const tasks = [];
+  for (const e of entries) {
+    if (!String(e.text || "").startsWith(TASK_MARK)) continue;
+    const t = parse(e, TASK_MARK) || { brief: String(e.text).slice(TASK_MARK.length) };
+    tasks.push({ index: Number.isInteger(t.index) ? t.index : tasks.length, brief: t.brief || "", swarm: t.swarm || "" });
+  }
+  if (!tasks.length) return { acted: false, reason: "no task" };
+
+  // Handoffs by task index. A legacy handoff (bare string or JSON without taskIndex) closes index 0 —
+  // the only shape single-task agents ever had.
+  const done = new Set();
+  for (const e of entries) {
+    if (!String(e.text || "").startsWith(HANDOFF_MARK)) continue;
+    const h = parse(e, HANDOFF_MARK);
+    done.add(Number.isInteger(h?.taskIndex) ? h.taskIndex : 0);
+  }
+  // Attempts per task index. Legacy try-markers (no idx) count against index 0.
+  const tries = new Map();
+  for (const e of entries) {
+    if (!String(e.text || "").startsWith(TRY_MARK)) continue;
+    const t = parse(e, TRY_MARK);
+    const idx = Number.isInteger(t?.idx) ? t.idx : 0;
+    tries.set(idx, (tries.get(idx) || 0) + 1);
   }
 
-  let brief = "", swarm = "";
-  try { const t = JSON.parse(task.text.slice(TASK_MARK.length)); brief = t.brief || ""; swarm = t.swarm || ""; }
-  catch { brief = task.text.slice(TASK_MARK.length); }
-  if (!brief.trim()) return { acted: false, reason: "empty brief" };
+  // The next task is simply the lowest index not yet handed off — derived, never stored.
+  const open = tasks.filter((t) => !done.has(t.index)).sort((a, b) => a.index - b.index);
+  if (!open.length) return { acted: false, done: true, reason: "all tasks handed off" };
+  const task = open[0];
+  if (!task.brief.trim()) {
+    await mem.append([{ role: "agent", text: HANDOFF_MARK + JSON.stringify({ taskIndex: task.index, text: "FAILED: empty brief", failed: true, at: new Date().toISOString() }) }]);
+    return { acted: true, reason: "empty brief closed" };
+  }
 
-  const attempts = entries.filter((e) => String(e.text || "").startsWith(TRY_MARK)).length;
+  const attempts = tries.get(task.index) || 0;
   if (attempts >= MAX_ATTEMPTS) {
-    // Terminal, and it must be SAID, not just stopped: a worker that silently goes quiet reads as
-    // "still running" in swarm_collect forever, and the whole point of the cap is to end that.
-    await mem.append([{ role: "agent", text: HANDOFF_MARK + JSON.stringify({ text: `FAILED after ${attempts} attempts. Brief: ${brief.slice(0, 200)}`, failed: true, at: new Date().toISOString() }) }]);
-    log(`swarm: gave up after ${attempts} attempts`);
-    return { acted: true, done: true, reason: "attempt cap" };
+    // Terminal AND said, per task: closing this index moves the lane to the next task instead of
+    // letting one impossible brief starve the whole pool.
+    await mem.append([{ role: "agent", text: HANDOFF_MARK + JSON.stringify({ taskIndex: task.index, text: `FAILED after ${attempts} attempts. Brief: ${task.brief.slice(0, 200)}`, failed: true, at: new Date().toISOString() }) }]);
+    log(`swarm: task ${task.index} gave up after ${attempts} attempts`);
+    return { acted: true, reason: "attempt cap" };
   }
 
-  // The attempt marker goes on-chain BEFORE the paid call. If the call (or this worker) dies, the
-  // next tick still sees the strike; recording it after would make a crash-looping step invisible
-  // to the cap it exists for.
-  await mem.append([{ role: "system", text: `${TRY_MARK}${JSON.stringify({ n: attempts + 1, at: new Date().toISOString() })}` }]);
+  // The attempt marker goes on-chain BEFORE the paid call, carrying the task index it counts against.
+  await mem.append([{ role: "system", text: `${TRY_MARK}${JSON.stringify({ n: attempts + 1, idx: task.index, at: new Date().toISOString() })}` }]);
 
-  log(`swarm: running task (attempt ${attempts + 1}/${MAX_ATTEMPTS})`);
+  log(`swarm: task ${task.index} (attempt ${attempts + 1}/${MAX_ATTEMPTS}) of ${tasks.length}`);
   const res = await chat({
     model: "auto",
     maxTokens: 900,
@@ -65,15 +88,14 @@ export async function runSwarmTick(mem, { chat, log = () => {} } = {}) {
           "the findings, the answer, or the artifact. No preamble, no restating the task. " +
           "If the task cannot be done, start your reply with CANNOT: and say why in one line.",
       },
-      { role: "user", content: brief },
+      { role: "user", content: task.brief },
     ],
   });
 
   const answer = String(res?.content ?? "").trim(); // makeChat returns { content, message, charged }
   if (!answer) throw new Error("model returned nothing"); // caught by serviceAgent; the strike above still counts
-  // JSON handoff so the cost travels WITH the result. Readers accept both shapes: this JSON and the
-  // legacy bare string — a format change must never make old handoffs unreadable.
-  await mem.append([{ role: "agent", text: HANDOFF_MARK + JSON.stringify({ text: answer, spentHero: res?.charged ?? null, tokIn: res?.tokIn ?? null, tokOut: res?.tokOut ?? null, at: new Date().toISOString() }) }]);
-  log(`swarm: handed off ${answer.length} chars${swarm ? ` (swarm "${swarm}")` : ""}`);
-  return { acted: true, done: true, reason: "handed off" };
+  await mem.append([{ role: "agent", text: HANDOFF_MARK + JSON.stringify({ taskIndex: task.index, text: answer, spentHero: res?.charged ?? null, tokIn: res?.tokIn ?? null, tokOut: res?.tokOut ?? null, at: new Date().toISOString() }) }]);
+  const remaining = open.length - 1;
+  log(`swarm: task ${task.index} handed off (${answer.length} chars)${remaining ? ` · ${remaining} task(s) remain` : " · pool complete"}`);
+  return { acted: true, done: remaining === 0, reason: "handed off" };
 }
