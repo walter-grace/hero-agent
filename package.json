@@ -4,7 +4,8 @@
   "description": "A personal AI agent with a wallet-owned, compacting memory. Brain = Hero Run (auto-routed inference). Memory syncs encrypted to Robinhood Chain. Built on hero-harness.",
   "type": "module",
   "bin": {
-    "hero-agent": "bin/hero-agent.mjs"
+    "hero-agent": "bin/hero-agent.mjs",
+    "hero": "bin/hero.mjs"
   },
   "exports": {
     ".": "./src/agent.mjs",
@@ -16,7 +17,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node bin/hero-agent.mjs chat"
+    "start": "node bin/hero-agent.mjs chat",
+    "build:tui": "esbuild src/tui/index.jsx --bundle --packages=external --format=esm --jsx=automatic --outfile=dist/tui.mjs --log-level=warning",
+    "tui": "npm run build:tui && node bin/hero.mjs"
   },
   "optionalDependencies": {
     "e2b": "^2.37.0",
@@ -34,5 +37,12 @@
     "onchain",
     "robinhood-chain"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "ink": "^5.0.0",
+    "react": "^18.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
 }
