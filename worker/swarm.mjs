@@ -43,7 +43,7 @@ export async function runSwarmTick(mem, { chat, log = () => {} } = {}) {
   if (attempts >= MAX_ATTEMPTS) {
     // Terminal, and it must be SAID, not just stopped: a worker that silently goes quiet reads as
     // "still running" in swarm_collect forever, and the whole point of the cap is to end that.
-    await mem.append([{ role: "agent", text: `${HANDOFF_MARK}FAILED after ${attempts} attempts. Brief: ${brief.slice(0, 200)}` }]);
+    await mem.append([{ role: "agent", text: HANDOFF_MARK + JSON.stringify({ text: `FAILED after ${attempts} attempts. Brief: ${brief.slice(0, 200)}`, failed: true, at: new Date().toISOString() }) }]);
     log(`swarm: gave up after ${attempts} attempts`);
     return { acted: true, done: true, reason: "attempt cap" };
   }
@@ -69,9 +69,11 @@ export async function runSwarmTick(mem, { chat, log = () => {} } = {}) {
     ],
   });
 
-  const answer = String(res?.content ?? "").trim(); // makeChat returns { content, message }
+  const answer = String(res?.content ?? "").trim(); // makeChat returns { content, message, charged }
   if (!answer) throw new Error("model returned nothing"); // caught by serviceAgent; the strike above still counts
-  await mem.append([{ role: "agent", text: `${HANDOFF_MARK}${answer}` }]);
+  // JSON handoff so the cost travels WITH the result. Readers accept both shapes: this JSON and the
+  // legacy bare string — a format change must never make old handoffs unreadable.
+  await mem.append([{ role: "agent", text: HANDOFF_MARK + JSON.stringify({ text: answer, spentHero: res?.charged ?? null, at: new Date().toISOString() }) }]);
   log(`swarm: handed off ${answer.length} chars${swarm ? ` (swarm "${swarm}")` : ""}`);
   return { acted: true, done: true, reason: "handed off" };
 }

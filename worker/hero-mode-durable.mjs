@@ -128,8 +128,11 @@ export function nextAction(task, done) {
 }
 
 // The checkpoint entry a harness writes after finishing one step. `at` is passed in, not read here.
-export function stepEntry(index, result, at) {
-  return { role: "agent", text: HM_STEP + JSON.stringify({ index: Number(index), result: String(result || "").slice(0, 6000), at: at || null }) };
+export function stepEntry(index, result, at, spentHero = null) {
+  // spentHero is what the step's inference call charged, recorded AT PAY TIME because a cost that
+  // is not written into the entry when it happens is unknowable later. Optional and additive: old
+  // callers pass three args and produce exactly the old entry shape.
+  return { role: "agent", text: HM_STEP + JSON.stringify({ index: Number(index), result: String(result || "").slice(0, 6000), at: at || null, ...(Number.isFinite(spentHero) ? { spentHero } : {}) }) };
 }
 
 // The entry a harness writes once when the run is finished, fails, or is cancelled. `at` is passed in.
@@ -213,10 +216,14 @@ export async function driveDurableStep({ task, entries, runModel, checkpoint, no
   const at = now();
   // A marked step overrides the run's model for that one call. Cost stays one call either way.
   const model = needsSearch(action.step) ? HERO_SEARCH_MODEL : task.model;
-  const result = await runModel({ model, maxTokens: task.maxTokens, messages: stepMessages(task, action, at) });
+  const r = await runModel({ model, maxTokens: task.maxTokens, messages: stepMessages(task, action, at) });
+  // runModel may return a bare string (every existing harness) or { text, spentHero } (a harness
+  // that reports what the call charged). Both are first-class; cost is recorded when known.
+  const result = typeof r === "string" ? r : String(r?.text ?? "");
+  const spent = typeof r === "object" && Number.isFinite(r?.spentHero) ? r.spentHero : null;
   // Effect before we claim progress: the checkpoint is the record. If it throws, the step is simply
   // not recorded and the next tick re-derives the same gap and retries it. Idempotent by construction.
-  await checkpoint([stepEntry(action.index, result, at)]);
+  await checkpoint([stepEntry(action.index, result, at, spent)]);
   const filled = done.length + 1;
   return { status: filled >= task.plan.length || filled >= task.maxSteps ? "final-step-done" : "stepped", index: action.index, filled, total: task.plan.length };
 }
@@ -270,10 +277,12 @@ export async function driveWithEventLog({ task, entries, events, appendEvent, ru
   const redo = wasStarted(events, action.index); // a prior intent with no on-chain result = a crash mid-step
   // WRITE-AHEAD: the intent is durable in the local log before anything executes.
   await appendEvent(intentEvent(action.index, { redo, at: now() }));
-  const result = await runModel({ model: needsSearch(action.step) ? HERO_SEARCH_MODEL : task.model, maxTokens: task.maxTokens, messages: stepMessages(task, action, now()) });
+  const r = await runModel({ model: needsSearch(action.step) ? HERO_SEARCH_MODEL : task.model, maxTokens: task.maxTokens, messages: stepMessages(task, action, now()) });
+  const result = typeof r === "string" ? r : String(r?.text ?? "");
+  const spent = typeof r === "object" && Number.isFinite(r?.spentHero) ? r.spentHero : null;
   // On-chain first (the authority), then the local result marker: if we crash between them, nextAction
   // still sees the step done on-chain next time, and the missing local marker is harmless metadata.
-  await checkpoint([stepEntry(action.index, result, now())]);
+  await checkpoint([stepEntry(action.index, result, now(), spent)]);
   await appendEvent(resultEvent(action.index, { at: now() }));
   const filled = done.length + 1;
   return { status: filled >= task.plan.length || filled >= task.maxSteps ? "final-step-done" : "stepped", index: action.index, redo };

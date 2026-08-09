@@ -51,8 +51,10 @@ function makeChat(env, trace) {
       charged_hero: hero.charged_hero ?? null,
     });
     // `message` carries tool_calls; `content` is kept so every existing caller is untouched.
+    // `charged` is what this call cost in $HERO — callers that write checkpoints should record it,
+    // because a cost that is not written into the entry at pay time is unknowable later.
     const message = d.choices?.[0]?.message || {};
-    return { content: message.content || "", message };
+    return { content: message.content || "", message, charged: Number(hero.charged_hero) || null };
   };
 }
 

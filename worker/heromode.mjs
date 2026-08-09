@@ -84,11 +84,13 @@ export async function runHeroModeTick(mem, { chat, now = () => new Date().toISOS
             });
             if (!String(content || "").trim()) throw new Error("empty model response");
             if (toolTrace.length) log(`heromode ${task.runId}: step used ${toolTrace.length} tool call(s)`);
-            return content;
+            // Cost is unknown on the tool path (several chatRaw calls inside the loop), and an
+            // honest null beats a partial number presented as the total.
+            return { text: content, spentHero: null };
           }
-          const { content } = await chat({ model, messages, maxTokens });
+          const { content, charged } = await chat({ model, messages, maxTokens });
           if (!String(content || "").trim()) throw new Error("empty model response");
-          return content;
+          return { text: content, spentHero: charged ?? null };
         },
         // The model call above already cost $HERO, so the step:: record MUST land: on RH's lagging
         // RPCs a single append can transiently fail, and without a retry that wastes the paid call and
