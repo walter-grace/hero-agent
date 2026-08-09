@@ -20,6 +20,25 @@ export HERO_RUN_KEY=hr_live_...   # mint one at https://herorunai.com/keys
 node bin/hero-agent.mjs chat      # talk to it; it remembers across sessions
 ```
 
+## The `hero` terminal
+
+The pretty front door: a full-screen terminal app (streaming chat, animated banner, slash-command
+palette, model picker, markdown, per-turn $HERO cost and tok/s). First run walks you through
+pasting a key (masked, saved 0600); after that it just opens.
+
+```bash
+node bin/hero.mjs        # or `hero` once the package is installed globally
+```
+
+Inside: `/model` picks a brain from the live catalog, `/balance` shows key + gas, `/agents` lists
+your on-chain agents, `/remember` mints the conversation to the working agent's memory NFT,
+`/recall` reads it back, and `/channel <id>` + `/send <id> <text>` speak the channels protocol
+(public rooms and encrypted group rooms, membership auto-detected from your on-chain wrap).
+`/stats` shows the session: turns, tokens, average speed with a sparkline, spend.
+
+Rebuild after editing `src/tui/`: `npm run build:tui` (the built `dist/tui.mjs` is committed so
+`hero` works from a fresh clone).
+
 You need no OpenAI or Anthropic key and no model list. Memory defaults to a local JSONL file, so a fresh clone runs on any machine with Node 20.
 
 ## Commands
