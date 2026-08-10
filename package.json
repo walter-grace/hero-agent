@@ -5,7 +5,8 @@
   "type": "module",
   "bin": {
     "hero-agent": "bin/hero-agent.mjs",
-    "hero": "bin/hero.mjs"
+    "hero": "bin/hero.mjs",
+    "hero-run": "bin/hero-run.mjs"
   },
   "exports": {
     ".": "./src/agent.mjs",

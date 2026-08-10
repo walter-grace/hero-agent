@@ -41,6 +41,30 @@ Rebuild after editing `src/tui/`: `npm run build:tui` (the built `dist/tui.mjs` 
 
 You need no OpenAI or Anthropic key and no model list. Memory defaults to a local JSONL file, so a fresh clone runs on any machine with Node 20.
 
+## One command: `hero-run`
+
+The whole point in a single line. Give it an agent and a mission; it does real work on your machine and writes what it did onto the agent, on-chain, live.
+
+```bash
+hero-run 31 "spin up a small HF model and report its exact tokens/sec"
+```
+
+That's it. `hero-run` finds the two keys for you so nobody has to remember flags:
+
+- **brain key** (pays for the thinking): `$HERO_RUN_KEY`, else `~/.hero-agent/hero-run-key.txt`. Mint one at [herorunai.com/keys](https://herorunai.com/keys).
+- **agent key** (signs the memory writes): whichever `~/.hero-agent/keys/*.key` actually owns that agent on-chain. It reads `ownerOf(<id>)` and matches.
+
+Under the hood it runs `hero-agent run --shell --memory onchain --agent <id>`, so the agent can download and run a model, run tests, inspect files, and every run mints its own trace to the agent instead of vanishing to a local file. When it finishes it prints a link to view the run on the graph.
+
+```bash
+hero-run 31 "run the test suite and summarize failures"   # real shell work, logged on-chain
+hero-run 31 "what changed in my memory this week?" --local # local memory, no chain, no gas
+hero-run 31 "…" --no-shell                                 # think only, no local commands
+hero-run 31 "…" --key-file ./agent.key --brain-key hr_live_…   # point at keys explicitly
+```
+
+> `--shell` lets the agent run commands on your machine, so only aim it at tasks you trust.
+
 ## Commands
 
 ```bash
