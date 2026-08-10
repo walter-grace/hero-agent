@@ -30,12 +30,13 @@ export async function createHeroAgent({
   system = DEFAULT_SYSTEM,
   skillsDir = "skills",
   mcpServers = [],
+  extraTools = [],                          // e.g. local shell tools (bin passes these with --shell)
   compactEvery = Number(process.env.HERO_AGENT_COMPACT_EVERY || 24),
   onEvent,
 } = {}) {
   const provider = heroRun({ apiKey });
   const mem = memory || new LocalMemory({ file: memoryFile });
-  const tools = [...builtinTools(provider), ...(mcpServers.length ? await mcpTools(mcpServers) : [])];
+  const tools = [...builtinTools(provider), ...extraTools, ...(mcpServers.length ? await mcpTools(mcpServers) : [])];
   const harness = new Harness({ provider, memory: mem, tools, system: system + loadSkills(skillsDir), compactEvery, onEvent });
   return harness;
 }

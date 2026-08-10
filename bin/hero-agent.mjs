@@ -328,7 +328,20 @@ async function main() {
   }
   if (!process.env.HERO_RUN_KEY) { console.error("Set HERO_RUN_KEY (mint at https://herorunai.com/keys)."); process.exit(1); }
   const memory = await makeMemory();
-  const agent = await createHeroAgent({ memory, mcpServers: mcpFromFlags(), onEvent });
+  // --shell gives the agent a local shell + file tools so it can run real commands on THIS machine
+  // (download and run a model, run tests, inspect files). The commands run on your box, so only use
+  // it on tasks you trust. Model downloads/runs are slow, so the shell timeout is generous.
+  let extraTools = [];
+  if (argv.includes("--shell")) {
+    const { shellTools } = await import("../src/tools/shell.mjs");
+    const { LocalExecutor } = await import("../src/bench/executor.mjs");
+    const executor = new LocalExecutor();
+    const baseExec = executor.exec.bind(executor);
+    executor.exec = (cmd, opts = {}) => baseExec(cmd, { timeout: 300000, ...opts }); // 5-min default for downloads
+    extraTools = shellTools(executor);
+    console.error("  · local shell ON (--shell): the agent can run commands on this machine.");
+  }
+  const agent = await createHeroAgent({ memory, mcpServers: mcpFromFlags(), extraTools, onEvent });
   console.error(`hero-agent · brain: Hero Run (auto) · memory: ${memory.label()}\n`);
 
   if (cmd === "bench") {
