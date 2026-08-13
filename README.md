@@ -119,6 +119,32 @@ Two design choices move the number. Routing sizes each call to the step instead 
 
 For context, published cost-per-task figures for other agent harnesses sit in a range of roughly $0.39 to $1.47. Those come from heavier coding benchmarks on frontier models, so read them as background, not a head-to-head. To get a number you can compare, run the coding benchmark below at a matching model tier.
 
+## Delegate-wave: cut your Claude/Codex token usage
+
+The pattern going around ("drop $20 on a provider, delegate everything cheap to a worker CLI") works
+even better here, because one minted key replaces the provider account entirely and the router
+already right-sizes each call.
+
+1. Mint an API key at [herorunai.com/keys](https://herorunai.com/keys) — pay in $HERO, no signup,
+   no per-provider accounts. That key funds every call below.
+2. Copy [`integrations/delegate-wave/SKILL.md`](integrations/delegate-wave/SKILL.md) into your
+   harness's skills directory (Claude Code: `.claude/skills/delegate-wave/SKILL.md`).
+3. Add one line to `AGENTS.md` / `CLAUDE.md`: **"Always use delegate-wave: delegate read,
+   discovery, and change work to the Hero Run worker; your role is to review and delegate."**
+4. The worker is this repo's CLI:
+
+```bash
+export HERO_RUN_KEY=hr_live_...
+hero-agent run "read src/ and summarize the auth flow" --model cheapest
+hero-agent run "find every rpcCall call site, list file:line" --model deepseek/deepseek-v4-flash-0731
+```
+
+`--model cheapest` pins the cheapest trusted model, `auto` right-sizes per task, or use any of the
+600+ catalog ids (`HERO_MODEL` env sets the default). Every call reports the exact $HERO charged, so
+the savings are measured, not asserted — `hero-agent bench` gives you the per-task number. Your
+frontier harness spends tokens only on review and decisions; the wave of reads, searches, and
+mechanical edits runs on models that cost a fraction of a cent.
+
 ## Coding benchmark
 
 `bench-code` scores the agent objectively: it solves a task in a sandbox, then a verifier runs (exit 0 means solved). Each run reports pass rate and cost per task.

@@ -341,8 +341,8 @@ async function main() {
     extraTools = shellTools(executor);
     console.error("  · local shell ON (--shell): the agent can run commands on this machine.");
   }
-  const agent = await createHeroAgent({ memory, mcpServers: mcpFromFlags(), extraTools, onEvent });
-  console.error(`hero-agent · brain: Hero Run (auto) · memory: ${memory.label()}\n`);
+  const agent = await createHeroAgent({ memory, mcpServers: mcpFromFlags(), extraTools, model: flag("model", process.env.HERO_MODEL || "auto"), onEvent });
+  console.error(`hero-agent · brain: Hero Run (${flag("model", process.env.HERO_MODEL || "auto")}) · memory: ${memory.label()}\n`);
 
   if (cmd === "bench") {
     // Measure REAL cost-per-task and compare with published agent-harness numbers. Uses a fresh

@@ -32,11 +32,12 @@ export async function createHeroAgent({
   mcpServers = [],
   extraTools = [],                          // e.g. local shell tools (bin passes these with --shell)
   compactEvery = Number(process.env.HERO_AGENT_COMPACT_EVERY || 24),
+  model = process.env.HERO_MODEL || "auto",  // routing mode or any catalog id — the delegate-wave cost knob
   onEvent,
 } = {}) {
   const provider = heroRun({ apiKey });
   const mem = memory || new LocalMemory({ file: memoryFile });
   const tools = [...builtinTools(provider), ...extraTools, ...(mcpServers.length ? await mcpTools(mcpServers) : [])];
-  const harness = new Harness({ provider, memory: mem, tools, system: system + loadSkills(skillsDir), compactEvery, onEvent });
+  const harness = new Harness({ provider, memory: mem, tools, system: system + loadSkills(skillsDir), compactEvery, model, onEvent });
   return harness;
 }
