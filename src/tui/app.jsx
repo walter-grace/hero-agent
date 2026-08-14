@@ -364,10 +364,13 @@ export default function App({ version }) {
         if (!agentId) { sys("universe", "Pick a memory agent first: /agents then /agent <id>.", true); break; }
         await withSpin("The Universe reviews the attempt", async () => {
           const { lesson, cost } = await universeReview({ key, task: lt.task, trace: lt.trace, answer: lt.answer });
+          if (cost) { setSpent((s) => s + cost); setBal((b) => (b == null ? b : Math.max(0, b - cost))); }
           if (!lesson) { sys("universe", "No durable lesson in that turn. The Hero did fine."); return; }
+          // YOU are the acceptance gate here: the lesson only mints if you judge it worth keeping.
+          const ok = await new Promise((resolveA) => setPendingTool({ name: "mint lesson", args: { lesson }, resolve: resolveA }));
+          if (!ok) { sys("universe", "Lesson rejected at your gate. Nothing touched the chain."); return; }
           const hash = await mintLesson(agentId, lesson);
           lessonsRef.current.list.push(lesson);
-          if (cost) { setSpent((s) => s + cost); setBal((b) => (b == null ? b : Math.max(0, b - cost))); }
           sys("universe", [`Lesson minted to agent #${agentId}:`, `  ${lesson}`, `tx ${hash.slice(0, 14)}… · the Hero starts every future session knowing this.`]);
         }).catch((e) => sys("universe", e.message, true));
         break;
@@ -599,7 +602,7 @@ export default function App({ version }) {
       {pendingTool && (
         <Box borderStyle="round" borderColor={BRASS} paddingX={1} marginTop={1} flexDirection="column">
           <Text bold color={BRASS}>{pendingTool.name} wants to run</Text>
-          <Text color={PAPER} wrap="truncate-end">  {pendingTool.name === "shell" ? String(pendingTool.args.cmd || "") : JSON.stringify(pendingTool.args).slice(0, 200)}</Text>
+          <Text color={PAPER} wrap="truncate-end">  {pendingTool.name === "shell" ? String(pendingTool.args.cmd || "") : pendingTool.args.lesson ? String(pendingTool.args.lesson) : JSON.stringify(pendingTool.args).slice(0, 200)}</Text>
           <Text color={STONE}>  (y)es once · (a)lways this session · (n)o</Text>
         </Box>
       )}

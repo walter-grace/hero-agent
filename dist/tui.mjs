@@ -1514,16 +1514,21 @@ You are Hero, a terminal agent on the user's macOS machine. Working directory: $
         }
         await withSpin("The Universe reviews the attempt", async () => {
           const { lesson, cost } = await universeReview({ key, task: lt.task, trace: lt.trace, answer: lt.answer });
-          if (!lesson) {
-            sys("universe", "No durable lesson in that turn. The Hero did fine.");
-            return;
-          }
-          const hash = await mintLesson(agentId, lesson);
-          lessonsRef.current.list.push(lesson);
           if (cost) {
             setSpent((s) => s + cost);
             setBal((b) => b == null ? b : Math.max(0, b - cost));
           }
+          if (!lesson) {
+            sys("universe", "No durable lesson in that turn. The Hero did fine.");
+            return;
+          }
+          const ok = await new Promise((resolveA) => setPendingTool({ name: "mint lesson", args: { lesson }, resolve: resolveA }));
+          if (!ok) {
+            sys("universe", "Lesson rejected at your gate. Nothing touched the chain.");
+            return;
+          }
+          const hash = await mintLesson(agentId, lesson);
+          lessonsRef.current.list.push(lesson);
           sys("universe", [`Lesson minted to agent #${agentId}:`, `  ${lesson}`, `tx ${hash.slice(0, 14)}\u2026 \xB7 the Hero starts every future session knowing this.`]);
         }).catch((e) => sys("universe", e.message, true));
         break;
@@ -1808,7 +1813,7 @@ You are Hero, a terminal agent on the user's macOS machine. Working directory: $
       ] }),
       /* @__PURE__ */ jsxs2(Text2, { color: PAPER, wrap: "truncate-end", children: [
         "  ",
-        pendingTool.name === "shell" ? String(pendingTool.args.cmd || "") : JSON.stringify(pendingTool.args).slice(0, 200)
+        pendingTool.name === "shell" ? String(pendingTool.args.cmd || "") : pendingTool.args.lesson ? String(pendingTool.args.lesson) : JSON.stringify(pendingTool.args).slice(0, 200)
       ] }),
       /* @__PURE__ */ jsx2(Text2, { color: STONE, children: "  (y)es once \xB7 (a)lways this session \xB7 (n)o" })
     ] }),
