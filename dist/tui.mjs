@@ -1034,6 +1034,10 @@ async function agentTurn({ key, model, messages, cwd, onTool, approve, signal, m
     }
   }
 }
+async function cerebrasModels() {
+  const j = await (await fetch(`${BASE2}/api/models`)).json();
+  return (j.models || []).filter((m) => m.kind === "text" && (m.gateways || []).includes("Cerebras")).map((m) => ({ id: m.id, hero: m.hero }));
+}
 
 // src/tui/app.jsx
 import { jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
@@ -1053,7 +1057,7 @@ var COMMANDS = [
   { name: "/vault", desc: "wallet secrets: ls \xB7 set N=V \xB7 get N \xB7 rm N \xB7 login <token>" },
   { name: "/tools", desc: "toggle agent mode (shell, files, web search with y/n approval)" },
   { name: "/auto", desc: "auto-approve every tool, no prompts (this session)" },
-  { name: "/turbo", desc: "swap to Cerebras speed: gpt-oss-120b@cerebras (~0.5s replies)" },
+  { name: "/turbo", desc: "pick any Cerebras-served model at wafer speed" },
   { name: "/clear", desc: "clear the conversation" },
   { name: "/exit", desc: "leave" }
 ];
@@ -1412,18 +1416,36 @@ function App({ version: version2 }) {
         break;
       }
       case "/turbo": {
-        const TURBO = "openai/gpt-oss-120b@cerebras";
-        if (model === TURBO) {
-          const backTo = preTurboRef.current || "auto";
-          setModel(backTo);
-          saveSettings({ model: backTo });
-          sys("turbo", `Turbo off. Back to ${backTo}.`);
-        } else {
-          preTurboRef.current = model;
-          setModel(TURBO);
-          saveSettings({ model: TURBO });
-          sys("turbo", "Turbo ON: gpt-oss-120b pinned to Cerebras (~0.5s replies). /turbo again to switch back.");
-        }
+        await withSpin("Fetching Cerebras models", async () => {
+          const ms = await cerebrasModels();
+          if (!ms.length) {
+            sys("turbo", "The catalog lists no Cerebras-served models right now.", true);
+            return;
+          }
+          const onTurbo = model.endsWith("@cerebras");
+          setOverlay({
+            title: "Turbo \u2014 Cerebras wafer speed",
+            filter: "",
+            sel: 0,
+            all: [
+              ...onTurbo ? [{ label: "turbo off", value: "__off", hint: `back to ${preTurboRef.current || "auto"}` }] : [],
+              ...ms.map((m) => ({ label: `${m.id}@cerebras`, value: `${m.id}@cerebras`, hint: `\u2B21 ${Math.round(m.hero).toLocaleString()}` }))
+            ],
+            onPick: (v) => {
+              if (v === "__off") {
+                const backTo = preTurboRef.current || "auto";
+                setModel(backTo);
+                saveSettings({ model: backTo });
+                sys("turbo", `Turbo off. Back to ${backTo}.`);
+                return;
+              }
+              if (!model.endsWith("@cerebras")) preTurboRef.current = model;
+              setModel(v);
+              saveSettings({ model: v });
+              sys("turbo", `Turbo ON: ${v} (~sub-second first token). /turbo \u2192 "turbo off" to restore.`);
+            }
+          });
+        }).catch((e) => sys("turbo", e.message, true));
         break;
       }
       case "/tools": {

@@ -343,3 +343,11 @@ export async function agentTurn({ key, model, messages, cwd, onTool, approve, si
     }
   }
 }
+
+// Models the Cerebras gateway serves right now, for the /turbo picker. Live from the catalog.
+export async function cerebrasModels() {
+  const j = await (await fetch(`${BASE}/api/models`)).json();
+  return (j.models || [])
+    .filter((m) => m.kind === "text" && (m.gateways || []).includes("Cerebras"))
+    .map((m) => ({ id: m.id, hero: m.hero }));
+}
