@@ -1,0 +1,43 @@
+[
+  {
+    "id": "gemma-4-31b@cerebras",
+    "label": "Gemma 4 31B",
+    "done": "student/habit-grid.html",
+    "secs": 4,
+    "cost": 46562,
+    "ok": true,
+    "note": "original run"
+  },
+  {
+    "id": "openai/gpt-oss-20b",
+    "label": "gpt-oss-20b",
+    "secs": 89.8,
+    "cost": 0,
+    "ok": false,
+    "err": "Vercel AI Gateway returned nothing usable."
+  },
+  {
+    "id": "qwen/qwen3-32b",
+    "label": "Qwen3 32B",
+    "secs": 86.2,
+    "cost": 66439,
+    "ok": true,
+    "err": null
+  },
+  {
+    "id": "z-ai/glm-4.7@cerebras",
+    "label": "GLM-4.7",
+    "secs": 6.2,
+    "cost": 192769,
+    "ok": true,
+    "err": null
+  },
+  {
+    "id": "openai/gpt-oss-120b@cerebras",
+    "label": "gpt-oss-120b",
+    "secs": 2.7,
+    "cost": 37003,
+    "ok": true,
+    "err": null
+  }
+]

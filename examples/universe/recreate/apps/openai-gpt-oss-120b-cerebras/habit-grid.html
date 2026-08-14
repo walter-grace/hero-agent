@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Habit Grid</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;font-family:system-ui, sans-serif;background:#0f1311;display:flex;align-items:center;justify-content:center;}
+  .card{background:#171d1a;border-radius:16px;padding:24px;max-width:960px;width:100%;box-sizing:border-box;color:#e0e0e0;}
+  h1{margin:0;font-size:2rem;}
+  .green{color:#6fdd92;}
+  .subtitle{font-size:0.9rem;color:#9aa19b;margin-top:8px;}
+  .stats{display:flex;justify-content:space-around;margin:16px 0;}
+  .stat{text-align:center;}
+  .stat .num{font-size:1.5rem;display:block;}
+  .stat .label{font-size:0.7rem;text-transform:uppercase;color:#6c7773;}
+  .month-labels{display:grid;grid-template-columns:repeat(53,12px);gap:3px;justify-content:start; margin-bottom:4px;}
+  .month-labels span{font-size:0.7rem;color:#6c7773;grid-row:1;}
+  .grid-wrapper{display:flex;}
+  .weekday-labels{display:grid;grid-template-rows:repeat(7,12px);gap:3px;align-items:center; margin-right:4px;}
+  .weekday-labels div{font-size:0.7rem;color:#6c7773;transform:translateY(-2px);}
+  .grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,12px);gap:3px;}
+  .cell{width:12px;height:12px;background:#1f2723;border-radius:3px;cursor:pointer;transition:transform .15s,outline .15s;}
+  .cell:hover{transform:scale(1.35);outline:2px solid #6fdd92;}
+  .cell.active{background:#6fdd92;}
+  .cell.today{outline:2px solid #6fdd92;}
+  .footer{display:flex;justify-content:space-between;align-items:center;margin-top:16px;font-size:0.8rem;color:#9aa19b;}
+  .legend{display:flex;gap:2px;}
+  .legend div{width:12px;height:12px;border-radius:3px;}
+  .legend .l0{background:#1f2723;}
+  .legend .l1{background:#2d4534;}
+  .legend .l2{background:#3e5b45;}
+  .legend .l3{background:#4f7156;}
+  .legend .l4{background:#6fdd92;}
+  button{background:#6fdd92;color:#0f1311;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Habit <span class="green">Grid</span></h1>
+  <div class="subtitle">Click a day every time you keep the habit. The year fills in.</div>
+  <div class="stats">
+    <div class="stat"><span class="num" id="total">0</span><span class="label">Days kept</span></div>
+    <div class="stat"><span class="num" id="currentStreak">0</span><span class="label">Current streak</span></div>
+    <div class="stat"><span class="num" id="bestStreak">0</span><span class="label">Best streak</span></div>
+  </div>
+  <div class="month-labels" id="monthLabels"></div>
+  <div class="grid-wrapper">
+    <div class="weekday-labels" id="weekdayLabels">
+      <div>Mon</div>
+      <div></div>
+      <div>Wed</div>
+      <div></div>
+      <div>Fri</div>
+      <div></div>
+      <div>Sun</div>
+    </div>
+    <div class="grid" id="grid"></div>
+  </div>
+  <div class="footer">
+    <div class="legend">
+      <div class="l0"></div>
+      <div class="l1"></div>
+      <div class="l2"></div>
+      <div class="l3"></div>
+      <div class="l4"></div>
+    </div>
+    <button id="resetBtn">Reset year</button>
+  </div>
+</div>
+<script>
+(function(){
+  const storageKey='habit-grid-v1';
+  const today=new Date();
+  const year=today.getFullYear();
+
+  // Generate all dates of the year
+  function getDates(){
+    const dates=[];
+    const start=new Date(year,0,1);
+    const end=new Date(year+1,0,1);
+    for(let d=start; d<end; d.setDate(d.getDate()+1)){
+      const iso=d.toISOString().slice(0,10);
+      dates.push(new Date(d)); // copy
+    }
+    return dates;
+  }
+  const allDates=getDates();
+  const isoDates=allDates.map(d=>d.toISOString().slice(0,10));
+
+  // Determine weekday of Jan 1 (0=Sun,6=Sat). GitHub grid starts with Sunday column, so we need padding cells for Mon-Sat before Sunday? Actually we need empty cells for days before first Sunday.
+  const jan1=new Date(year,0,1);
+  const startWeekday=jan1.getDay(); // 0 Sun
+  const paddingCount=startWeekday; // number of empty cells before Jan1 to align Sunday column
+
+  // Load persisted marked dates
+  let marked=new Set(JSON.parse(localStorage.getItem(storageKey)||'[]'));
+
+  const grid=document.getElementById('grid');
+
+  // Create padding cells
+  for(let i=0;i<paddingCount;i++){
+    const pad=document.createElement('div');
+    pad.className='cell';
+    pad.style.visibility='hidden';
+    grid.appendChild(pad);
+  }
+
+  // Create day cells
+  allDates.forEach(date=>{
+    const iso=date.toISOString().slice(0,10);
+    const cell=document.createElement('div');
+    cell.className='cell';
+    cell.title=iso;
+    if(marked.has(iso)) cell.classList.add('active');
+    // Highlight today
+    const isToday=date.toDateString()===today.toDateString();
+    if(isToday) cell.classList.add('today');
+    cell.addEventListener('click',()=>{
+      if(marked.has(iso)){
+        marked.delete(iso);
+        cell.classList.remove('active');
+      }else{
+        marked.add(iso);
+        cell.classList.add('active');
+      }
+      persist();
+      updateStats();
+    });
+    grid.appendChild(cell);
+  });
+
+  function persist(){
+    localStorage.setItem(storageKey, JSON.stringify([...marked]));
+  }
+
+  // Month labels
+  const monthLabels=document.getElementById('monthLabels');
+  const monthStartWeeks=[]; // column index (including padding) where month starts
+  for(let m=0;m<12;m++){
+    const firstDay=new Date(year,m,1);
+    const dayOfYear=Math.floor((firstDay - new Date(year,0,1))/86400000);
+    const col=Math.floor((dayOfYear+paddingCount)/7);
+    monthStartWeeks.push(col);
+    const span=document.createElement('span');
+    span.textContent=firstDay.toLocaleString('en-US',{month:'short'});
+    span.style.gridColumnStart=col+1; // CSS grid is 1-indexed
+    monthLabels.appendChild(span);
+  }
+
+  // Stats calculation
+  const totalEl=document.getElementById('total');
+  const curStreakEl=document.getElementById('currentStreak');
+  const bestStreakEl=document.getElementById('bestStreak');
+
+  function updateStats(){
+    const total=marked.size;
+    totalEl.textContent=total;
+    // Compute streaks up to today (or yesterday if today not marked)
+    let best=0, current=0, run=0;
+    for(let i=0;i<allDates.length;i++){
+      const iso=isoDates[i];
+      if(marked.has(iso)){
+        run++;
+        if(run>best) best=run;
+      }else{
+        run=0;
+      }
+      // Stop at today for current streak calc
+      const date=allDates[i];
+      if(date>today) break;
+    }
+    // Determine current streak: count backwards from today (or yesterday if today unmarked)
+    let cur=0;
+    for(let i=allDates.length-1;i>=0;i--){
+      const d=allDates[i];
+      const iso=isoDates[i];
+      if(d>today) continue;
+      if(marked.has(iso)) cur++; else break;
+    }
+    curStreakEl.textContent=cur;
+    bestStreakEl.textContent=best;
+  }
+
+  updateStats();
+
+  // Reset button
+  document.getElementById('resetBtn').addEventListener('click',()=>{
+    if(confirm('Delete all marks for this year?')){
+      marked.clear();
+      // remove active class
+      document.querySelectorAll('.cell.active').forEach(c=>c.classList.remove('active'));
+      persist();
+      updateStats();
+    }
+  });
+})();
+</script>
+</body>
+</html>

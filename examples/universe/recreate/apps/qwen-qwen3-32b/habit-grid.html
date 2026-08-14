@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Habit Grid</title>
+  <style>
+    body {
+      background: #0f1311;
+      color: #ccc;
+      font-family: sans-serif;
+      display: flex;
+      height: 100vh;
+      justify-content: center;
+      align-items: center;
+      margin: 0;
+    }
+    .card {
+      background: #171d1a;
+      padding: 24px;
+      border-radius: 16px;
+      width: 900px;
+      box-shadow: 0 0 10px #0f1311;
+    }
+    .title {
+      font-size: 24px;
+      color: #6fdd92;
+      text-align: center;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: #888;
+      text-align: center;
+      margin: 6px 0;
+    }
+    .stats {
+      display: flex;
+      justify-content: space-between;
+      margin: 16px 0;
+    }
+    .stat {
+      text-align: center;
+      font-size: 10px;
+      color: #888;
+      text-transform: uppercase;
+    }
+    .grid {
+      display: grid;
+      grid-auto-flow: column;
+      grid-template-rows: repeat(7, 12px);
+      gap: 3px;
+      margin: 16px 0;
+    }
+    .cell {
+      width: 12px;
+      height: 12px;
+      background: #1f2723;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.1s;
+    }
+    .cell:hover {
+      transform: scale(1.35);
+      outline: 1px solid #6fdd92;
+    }
+    .today {
+      outline: 1px solid #6fdd92;
+    }
+    .month {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .month span {
+      font-size: 10px;
+      color: #888;
+      text-transform: uppercase;
+    }
+    .weekday {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: #888;
+      margin-bottom: 6px;
+    }
+    .legend {
+      display: flex;
+      gap: 4px;
+      margin: 12px 0;
+    }
+    .legend div {
+      width: 10px;
+      height: 10px;
+      background: linear-gradient(
+        to right,
+        #1f2723,
+        #6fdd92
+      );
+    }
+    .reset {
+      float: right;
+      font-size: 10px;
+      color: #888;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">Habit Grid</div>
+    <div class="subtitle">Click a day every time you keep the habit. The year fills in.</div>
+    <div class="stats">
+      <div class="stat">DAYS KEPT: <span id="total">0</span></div>
+      <div class="stat">CURRENT STREAK: <span id="current">0</span></div>
+      <div class="stat">BEST STREAK: <span id="best">0</span></div>
+    </div>
+    <div class="month">
+      <span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span>
+      <span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span><span>Nov</span><span>Dec</span>
+    </div>
+    <div class="weekday">
+      <span>Mon</span><span>Wed</span><span>Fri</span>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="legend">
+      <div style="background: #1f2723"></div>
+      <div style="background: #3a453d"></div>
+      <div style="background: #556557"></div>
+      <div style="background: #708572"></div>
+      <div style="background: #6fdd92"></div>
+    </div>
+    <div class="reset" onclick="if(confirm('Reset year?')) localStorage.removeItem('habit-grid-v1')">Reset year</div>
+  </div>
+
+  <script>
+    const grid = document.getElementById('grid');
+    const total = document.getElementById('total');
+    const current = document.getElementById('current');
+    const best = document.getElementById('best');
+
+    const today = new Date();
+    const year = today.getFullYear();
+    const startOfYear = new Date(year, 0, 1);
+    const endOfYear = new Date(year + 1, 0, 1);
+
+    // Determine if leap year
+    const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    const daysInYear = isLeap ? 366 : 365;
+
+    // Calculate weekday padding
+    const startWeekday = startOfYear.getDay(); // 0 = Sunday
+    const padding = (7 - startWeekday) % 7;
+
+    // Generate all dates
+    const dates = [];
+    let date = new Date(startOfYear);
+    while (date < endOfYear) {
+      dates.push(new Date(date));
+      date.setDate(date.getDate() + 1);
+    }
+
+    // Load from localStorage
+    let marked = new Set(JSON.parse(localStorage.getItem('habit-grid-v1') || '[]'));
+
+    // Render grid
+    function render() {
+      grid.innerHTML = '';
+      // Add padding cells
+      for (let i = 0; i < padding; i++) {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        grid.appendChild(cell);
+      }
+
+      // Add date cells
+      dates.forEach(date => {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        const iso = date.toISOString().split('T')[0];
+        cell.title = iso;
+        if (marked.has(iso)) {
+          cell.style.background = '#6fdd92';
+        }
+        if (date.toDateString() === today.toDateString()) {
+          cell.classList.add('today');
+        }
+        cell.addEventListener('click', () => {
+          if (marked.has(iso)) {
+            marked.delete(iso);
+            cell.style.background = '#1f2723';
+          } else {
+            marked.add(iso);
+            cell.style.background = '#6fdd92';
+          }
+          localStorage.setItem('habit-grid-v1', JSON.stringify([...marked]));
+          updateStats();
+        });
+        grid.appendChild(cell);
+      });
+
+      // Update stats
+      updateStats();
+    }
+
+    // Calculate streaks
+    function updateStats() {
+      let totalKept = marked.size;
+      total.textContent = totalKept;
+
+      let currentStreak = 0;
+      let bestStreak = 0;
+
+      // Walk from today backward
+      let date = new Date(today);
+      let streak = 0;
+      while (date >= startOfYear) {
+        const iso = date.toISOString().split('T')[0];
+        if (marked.has(iso)) {
+          streak++;
+          bestStreak = Math.max(bestStreak, streak);
+        } else {
+          streak = 0;
+          // Stop if today is unmarked and we're counting current streak
+          if (date.toDateString() === today.toDateString()) break;
+        }
+        date.setDate(date.getDate() - 1);
+      }
+
+      // Current streak is the longest run up to today
+      currentStreak = Math.max(streak, bestStreak);
+      current.textContent = currentStreak;
+      best.textContent = bestStreak;
+    }
+
+    render();
+  </script>
+</body>
+</html>

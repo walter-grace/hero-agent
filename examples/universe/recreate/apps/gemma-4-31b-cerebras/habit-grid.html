@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habit Grid</title>
+    <style>
+        :root {
+            --bg-color: #0f1311;
+            --card-color: #171d1a;
+            --accent-green: #6fdd92;
+            --empty-cell: #1f2723;
+            --text-main: #e0e6e3;
+            --text-muted: #8a9590;
+            --border-radius: 16px;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .card {
+            background-color: var(--card-color);
+            border-radius: var(--border-radius);
+            padding: 32px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            max-width: 850px;
+            width: 100%;
+            user-select: none;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin: 0 0 8px 0;
+            font-weight: 700;
+        }
+
+        h1 span {
+            color: var(--accent-green);
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin: 0;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: center;
+            gap: 48px;
+            margin-bottom: 40px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            display: block;
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            display: block;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .grid-container {
+            position: relative;
+            margin-bottom: 24px;
+            display: inline-block;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* Month labels row */
+        .month-labels {
+            display: grid;
+            grid-template-columns: 20px repeat(53, 12px); /* padding + 53 weeks approx */
+            gap: 3px 0;
+            margin-bottom: 8px;
+            pointer-events: none;
+        }
+
+        .month-label {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            text-align: left;
+            padding-left: 2px;
+        }
+
+        /* Grid Layout */
+        .grid-wrapper {
+            display: flex;
+        }
+
+        .weekday-labels {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding-bottom: 12px;
+            margin-right: 8px;
+            width: 20px;
+        }
+
+        .weekday-label {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            line-height: 12px;
+            height: 12px;
+        }
+
+        .habit-grid {
+            display: grid;
+            grid-auto-flow: column;
+            grid-template-rows: repeat(7, 12px);
+            gap: 3px;
+        }
+
+        .cell {
+            width: 12px;
+            height: 12px;
+            background-color: var(--empty-cell);
+            border-radius: 3px;
+            cursor: pointer;
+            transition: transform 0.1s ease, background-color 0.2s ease;
+            position: relative;
+        }
+
+        .cell:hover {
+            transform: scale(1.35);
+            z-index: 10;
+            outline: 2px solid var(--accent-green);
+            outline-offset: 1px;
+        }
+
+        .cell.kept {
+            background-color: var(--accent-green);
+        }
+
+        .cell.today {
+            outline: 2px solid var(--accent-green);
+            outline-offset: 1px;
+        }
+
+        .cell.empty-pad {
+            cursor: default;
+            pointer-events: none;
+            background: transparent;
+        }
+
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .legend {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .legend-swatches {
+            display: flex;
+            gap: 4px;
+            margin: 0 8px;
+        }
+
+        .swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+
+        .btn-reset {
+            background: transparent;
+            border: 1px solid #333;
+            color: var(--text-muted);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-reset:hover {
+            border-color: #ff5f5f;
+            color: #ff5f5f;
+        }
+
+        /* a bit of responsive scale */
+        @media (max-width: 800px) {
+            .card { transform: scale(0.85); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <div class="header">
+            <h1>Habit <span>Grid</span></h1>
+            <p class="subtitle">Click a day every time you keep the habit. The year fills in.</p>
+        </div>
+
+        <div class="stats-row">
+            <div class="stat-item">
+                <span class="stat-value" id="stat-total">0</span>
+                <span class="stat-label">Days Kept</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="stat-current">0</span>
+                <span class="stat-label">Current Streak</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="stat-best">0</span>
+                <span class="stat-label">Best Streak</span>
+            </div>
+        </div>
+
+        <div class="grid-container">
+            <div class="month-labels" id="month-labels"></div>
+            <div class="grid-wrapper">
+                <div class="weekday-labels">
+                    <div class="weekday-label">Sun</div>
+                    <div class="weekday-label"></div>
+                    <div class="weekday-label">Tue</div>
+                    <div class="weekday-label"></div>
+                    <div class="weekday-label">Thu</div>
+                    <div class="weekday-label"></div>
+                    <div class="weekday-label">Sat</div>
+                </div>
+                <div class="habit-grid" id="habit-grid"></div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="legend">
+                <span>Less</span>
+                <div class="legend-swatches">
+                    <div class="swatch" style="background: #1f2723"></div>
+                    <div class="swatch" style="background: #2d3d35"></div>
+                    <div class="swatch" style="background: #3c5146"></div>
+                    <div class="swatch" style="background: #4b6557"></div>
+                    <div class="swatch" style="background: #6fdd92"></div>
+                </div>
+                <span>More</span>
+            </div>
+            <button class="btn-reset" onclick="resetYear()">Reset Year</button>
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_KEY = 'habit-grid-v1';
+        let keptDates = new Set();
+        const currentYear = new Date().getFullYear();
+
+        function init() {
+            loadData();
+            renderGrid();
+            updateStats();
+        }
+
+        function loadData() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                const datesArray = JSON.parse(saved);
+                keptDates = new Set(datesArray);
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify([...keptDates]));
+        }
+
+        function getISODate(date) {
+            return date.toISOString().split('T')[0];
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('habit-grid');
+            const monthLabels = document.getElementById('month-labels');
+            grid.innerHTML = '';
+            monthLabels.innerHTML = '';
+
+            const startDate = new Date(currentYear, 0, 1);
+            const endDate = new Date(currentYear + 1, 0, 1);
+            const todayStr = getISODate(new Date());
+
+            // 1. Weekday Padding
+            // GitHub style: Columns are weeks. Each column starts on Sunday.
+            // startDate.getDay(): 0 = Sun, 1 = Mon, etc.
+            const paddingDays = startDate.getDay();
+            for (let i = 0; i < paddingDays; i++) {
+                const pad = document.createElement('div');
+                pad.className = 'cell empty-pad';
+                grid.appendChild(pad);
+            }
+
+            // 2. Generate Day Cells
+            let currentDate = new Date(startDate);
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            let lastMonth = -1;
+
+            while (currentDate < endDate) {
+                const dateStr = getISODate(currentDate);
+                
+                // Handle month labels
+                const monthIdx = currentDate.getMonth();
+                if (monthIdx !== lastMonth) {
+                    // Place month label at the start of the month
+                    // We calculate the column based on total days passed from Jan 1 (including padding)
+                    // but a simpler way is just to inject them as the loop progresses.
+                    // However, to align exactly, we'll use a placeholder method.
+                    const label = document.createElement('div');
+                    label.className = 'month-label';
+                    label.textContent = months[monthIdx];
+                    label.style.gridColumnStart = Math.floor((currentDate - startDate) / (1000*60*60*24) + paddingDays / 7) * 7 + 1;
+                    // Since we use CSS Grid auto-flow column, column index is roughly (day + padding)/7
+                    // Let's just track columns manually.
+                    lastMonth = monthIdx;
+                }
+
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                if (keptDates.has(dateStr)) cell.classList.add('kept');
+                if (dateStr === todayStr) cell.classList.add('today');
+                cell.title = dateStr;
+                
+                cell.onclick = () => {
+                    if (keptDates.has(dateStr)) {
+                        keptDates.delete(dateStr);
+                    } else {
+                        keptDates.add(dateStr);
+                    }
+                    saveData();
+                    cell.classList.toggle('kept');
+                    updateStats();
+                };
+
+                grid.appendChild(cell);
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            // Fixing Month Labels: Since the grid is auto-flow column, 
+            // the layout is a bit dynamic. Let's use a cleaner approach for labels.
+            // we calculate the X position of the first day of each month.
+            monthLabels.innerHTML = '';
+            const labelPadding = 20; // the rail width
+            months.forEach((m, idx) => {
+                const firstOfMonth = new Date(currentYear, idx, 1);
+                const dayOfYear = Math.floor((firstOfMonth - startDate) / (1000*60*60*24));
+                const column = Math.floor((dayOfYear + paddingDays) / 7);
+                const label = document.createElement('div');
+                label.className = 'month-label';
+                label.textContent = m;
+                // offset it by padding (20px) + column * (12px cell + 3px gap)
+                label.style.position = 'absolute';
+                label.style.left = `${labelPadding + (column * 15)}px`;
+                label.style.top = '0';
+                monthLabels.appendChild(label);
+            });
+            monthLabels.style.position = 'relative';
+            monthLabels.style.height = '15px';
+        }
+
+        function updateStats() {
+            const total = keptDates.size;
+            
+            // Streaks
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            
+            const startDate = new Date(currentYear, 0, 1);
+            const endDate = new Date(currentYear + 1, 0, 1);
+            
+            let currentStreak = 0;
+            let bestStreak = 0;
+            let tempStreak = 0;
+
+            // Iterate through the whole year to find best streak
+            let checkDate = new Date(startDate);
+            while (checkDate < endDate) {
+                const dateStr = getISODate(checkDate);
+                if (keptDates.has(dateStr)) {
+                    tempStreak++;
+                    bestStreak = Math.max(bestStreak, tempStreak);
+                } else {
+                    tempStreak = 0;
+                }
+                checkDate.setDate(checkDate.getDate() + 1);
+            }
+
+            // Current streak calculation: 
+            // Start from today. If today is kept, start counting back.
+            // If today is NOT kept, start counting back from yesterday.
+            let streakDate = new Date(today);
+            const todayStr = getISODate(today);
+            
+            if (!keptDates.has(todayStr)) {
+                streakDate.setDate(streakDate.getDate() - 1);
+            }
+
+            while (streakDate >= startDate) {
+                const ds = getISODate(streakDate);
+                if (keptDates.has(ds)) {
+                    currentStreak++;
+                    streakDate.setDate(streakDate.getDate() - 1);
+                } else {
+                    break;
+                }
+            }
+
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-current').textContent = currentStreak;
+            document.getElementById('stat-best').textContent = bestStreak;
+        }
+
+        function resetYear() {
+            if (confirm('Are you sure you want to reset all progress for this year?')) {
+                keptDates.clear();
+                saveData();
+                renderGrid();
+                updateStats();
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
