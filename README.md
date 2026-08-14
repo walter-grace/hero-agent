@@ -205,6 +205,24 @@ hero-agent chat --mcp "fff:$HOME/.local/bin/fff-mcp"
 
 Either way the agent gains three tools: `fff__find_files` (fuzzy filename search), `fff__grep` (content search), and `fff__multi_grep` (multi-pattern content search). The [search skill](skills/search/SEARCH.md) tells the agent to prefer these over shelling out to `grep`/`find` in a large repo. Because fff ships its own MCP server, the same install also benefits any Claude Code, Cursor, or Codex user (add `fff-mcp` to their MCP config), including alongside Hero Run's hosted MCP.
 
+## One call, any harness
+
+Run any coding harness with Hero Run as its brain. The SDK writes the harness's config if it's
+missing (never touches an existing one), resolves your key (env → key file → wallet vault), and
+hands off the task:
+
+```bash
+hero-agent harness ls                                # what's available on this machine
+hero-agent harness dsh "fix the failing test"        # DeepSeek Harness, headless
+hero-agent harness claude "add input validation"     # Claude Code
+hero-agent harness opencode "write the migration"    # OpenCode
+hero-agent harness grok "profile this function"      # Grok Build
+```
+
+`--model auto|cheapest|<any catalog id>` picks the brain. The harness does the agenting; Hero Run
+does the thinking across 600+ models; the vault supplies the secrets. Verified live: dsh and Claude
+Code both answered through this command, billed in $HERO, key loaded from the wallet vault.
+
 ## Secrets from your wallet, not .env files
 
 Your agent's API keys, tokens, and connection strings can live in your Hero vault: AES-sealed under a

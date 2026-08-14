@@ -67,7 +67,7 @@ const onEvent = (type, data) => {
 
 // Commands that never call the Hero Run brain (they run entirely in a sandbox) do not need a
 // HERO_RUN_KEY. replay is the val_bpb oracle: it only needs E2B_API_KEY.
-const NO_BRAIN = new Set(["replay", "autoresearch", "cascade-bench", "job", "run-due", "wallet", "export", "import", "attach", "files", "get-file", "vault"]);
+const NO_BRAIN = new Set(["replay", "autoresearch", "cascade-bench", "job", "run-due", "wallet", "export", "import", "attach", "files", "get-file", "vault", "harness"]);
 const MIME = { ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json", ".csv": "text/csv", ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".html": "text/html", ".js": "text/javascript" };
 
 async function main() {
@@ -103,6 +103,32 @@ async function main() {
       }
       console.error("Usage: hero-agent wallet new [--out <path>]  |  hero-agent wallet mint-agent --key-file <path> [--label cron]");
       process.exit(1);
+    }
+    // One call, any harness: run a coding harness (dsh, claude, opencode, grok) with Hero Run as
+    // its brain. Config written only if missing; key resolved env → key file → wallet vault.
+    if (cmd === "harness") {
+      const { HARNESSES, runHarness } = await import("../src/harnesses.mjs");
+      const sub = rest[0];
+      if (!sub || sub === "ls") {
+        for (const [name, h] of Object.entries(HARNESSES))
+          console.log(`  ${name.padEnd(10)} ${h.label.padEnd(18)} ${h.available() ? "✓ ready" : `✗ ${h.install}`}`);
+        console.log('\nUsage: hero-agent harness <name> "task" [--model auto|cheapest|<id>]');
+        return;
+      }
+      const task = rest.slice(1).join(" ");
+      if (!task) { console.error(`Usage: hero-agent harness ${sub} "task" [--model auto]`); process.exit(1); }
+      // key: env → TUI key file → wallet vault
+      let key = process.env.HERO_RUN_KEY || "";
+      if (!key) { try { key = (await import("node:fs")).readFileSync(join(homedir(), ".hero-agent", "hero-run-key.txt"), "utf8").trim(); } catch {} }
+      if (!key) {
+        try {
+          const V = await import("../src/vault.mjs");
+          if (V.vaultToken()) key = (await V.secrets({ purpose: `harness ${sub}` })).HERO_RUN_KEY || "";
+          if (key) console.error("✓ HERO_RUN_KEY loaded from your wallet vault");
+        } catch {}
+      }
+      if (!key) { console.error("No HERO_RUN_KEY found (env, key file, or vault). Mint one at https://herorunai.com/keys"); process.exit(1); }
+      process.exit(await runHarness(sub, task, { model: flag("model", "auto"), key }));
     }
     // Secrets from your wallet, not .env files. `vault login` derives a read-only vault token (once,
     // from a key file OR a token pasted from the web UI, so a server never sees the private key);
