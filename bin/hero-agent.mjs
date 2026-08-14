@@ -7,7 +7,7 @@
 //   hero-agent compact              force a compaction now
 //   hero-agent prove "<statement>"  prove a theorem in Lean 4 in an E2B sandbox (loops until it verifies)
 //   hero-agent replay <path-to-diff> replay a contributed train.py diff in a sandbox, measure val_bpb, verdict
-// Flags: --memory local|onchain  --file <path>  --agent <id>  --mcp <name:command>  --fff (fast file search)
+// Flags: --memory local|onchain|commonware  --file <path>  --agent <id>  --daemon <url>  --mcp <name:command>  --fff (fast file search)
 //        prove: --full-mathlib  --timeout <seconds>  --model auto|cheapest  (needs E2B_API_KEY, ARISTOTLE_API_KEY)
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +31,15 @@ async function makeMemory() {
     let privateKey;
     if (kf) { const { readKeyFile } = await import("../src/wallet.mjs"); privateKey = readKeyFile(kf); }
     return new OnchainMemory({ agentId: flag("agent"), ...(privateKey ? { privateKey } : {}) });
+  }
+  if (kind === "commonware") {
+    // Same wallet, same blob format, same key derivation as onchain — the substrate is a memoryd
+    // daemon (Commonware journal) instead of Robinhood Chain. --daemon overrides the URL.
+    const { CommonwareMemory } = await import("../src/memory/commonware.mjs");
+    const kf = flag("key-file");
+    let privateKey;
+    if (kf) { const { readKeyFile } = await import("../src/wallet.mjs"); privateKey = readKeyFile(kf); }
+    return new CommonwareMemory({ agentId: flag("agent"), daemon: flag("daemon"), ...(privateKey ? { privateKey } : {}) });
   }
   return new LocalMemory({ file: flag("file", join(homedir(), ".hero-agent", "memory", "default.jsonl")) });
 }
@@ -58,7 +67,7 @@ const onEvent = (type, data) => {
 
 // Commands that never call the Hero Run brain (they run entirely in a sandbox) do not need a
 // HERO_RUN_KEY. replay is the val_bpb oracle: it only needs E2B_API_KEY.
-const NO_BRAIN = new Set(["replay", "autoresearch", "cascade-bench", "job", "run-due", "wallet", "export", "import", "attach", "files", "get-file"]);
+const NO_BRAIN = new Set(["replay", "autoresearch", "cascade-bench", "job", "run-due", "wallet", "export", "import", "attach", "files", "get-file", "vault"]);
 const MIME = { ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json", ".csv": "text/csv", ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".html": "text/html", ".js": "text/javascript" };
 
 async function main() {
@@ -93,6 +102,69 @@ async function main() {
         return;
       }
       console.error("Usage: hero-agent wallet new [--out <path>]  |  hero-agent wallet mint-agent --key-file <path> [--label cron]");
+      process.exit(1);
+    }
+    // Secrets from your wallet, not .env files. `vault login` derives a read-only vault token (once,
+    // from a key file OR a token pasted from the web UI, so a server never sees the private key);
+    // after that, `vault run -- <cmd>` launches anything with the vault's env injected, nothing on disk.
+    if (cmd === "vault") {
+      const V = await import("../src/vault.mjs");
+      const sub = rest[0];
+      if (sub === "login") {
+        const token = flag("token");
+        let privateKey;
+        if (!token) {
+          const kf = flag("key-file");
+          if (kf) { const { readKeyFile } = await import("../src/wallet.mjs"); privateKey = readKeyFile(kf); }
+          else if (process.env.AGENT_PRIVATE_KEY) privateKey = process.env.AGENT_PRIVATE_KEY;
+        }
+        const { address, tokenPath } = await V.vaultLogin({ token, privateKey });
+        console.log(`✓ vault token saved for ${address} → ${tokenPath} (0600)`);
+        console.log("This token can decrypt your vault. It CANNOT sign, spend, or mint.");
+        if (privateKey) console.log("The private key is no longer needed on this machine for secrets.");
+        return;
+      }
+      if (sub === "set") {
+        const pairs = rest.slice(1).filter((a) => a.includes("="));
+        if (!pairs.length) { console.error('Usage: hero-agent vault set NAME=value [NAME2=value2 …]'); process.exit(1); }
+        for (const p of pairs) { const i = p.indexOf("="); await V.setSecret(p.slice(0, i), p.slice(i + 1)); console.log(`✓ ${p.slice(0, i)}`); }
+        return;
+      }
+      if (sub === "get") {
+        const env = await V.secrets({ purpose: `vault get ${rest[1]}` });
+        if (!(rest[1] in env)) { console.error(`${rest[1]} is not in the vault.`); process.exit(1); }
+        process.stdout.write(env[rest[1]]);
+        return;
+      }
+      if (sub === "ls") {
+        const names = await V.listSecrets();
+        console.log(names.length ? names.join("\n") : "(vault has no env vars yet — `hero-agent vault set NAME=value`)");
+        return;
+      }
+      if (sub === "rm") {
+        if (!rest[1]) { console.error("Usage: hero-agent vault rm NAME"); process.exit(1); }
+        await V.deleteSecret(rest[1]);
+        console.log(`✓ removed ${rest[1]}`);
+        return;
+      }
+      if (sub === "run") {
+        // hero-agent vault run -- node bot.mjs   → child gets the vault env; nothing written to disk.
+        const sep = argv.indexOf("--");
+        const child = sep >= 0 ? argv.slice(sep + 1) : rest.slice(1);
+        if (!child.length) { console.error("Usage: hero-agent vault run -- <command> [args…]"); process.exit(1); }
+        const env = await V.secrets({ purpose: `vault run ${child.join(" ")}`.slice(0, 120) });
+        const { spawn } = await import("node:child_process");
+        const proc = spawn(child[0], child.slice(1), { stdio: "inherit", env: { ...env, ...process.env } });
+        proc.on("exit", (code) => process.exit(code ?? 0));
+        return;
+      }
+      if (sub === "env") {
+        // eval "$(hero-agent vault env)" — for shells; values single-quoted safely.
+        const env = await V.secrets({ purpose: "vault env (shell export)" });
+        for (const [k, v] of Object.entries(env)) console.log(`export ${k}='${String(v).replace(/'/g, `'\\''`)}'`);
+        return;
+      }
+      console.error("Usage: hero-agent vault login [--key-file <path> | --token hvt1…]  |  set NAME=value  |  get NAME  |  ls  |  rm NAME  |  run -- <cmd>  |  env");
       process.exit(1);
     }
     // Cascade eval: measure cost/quality of a FrugalGPT-style cascade vs cheap/frontier/auto baselines.

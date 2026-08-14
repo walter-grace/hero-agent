@@ -205,6 +205,42 @@ hero-agent chat --mcp "fff:$HOME/.local/bin/fff-mcp"
 
 Either way the agent gains three tools: `fff__find_files` (fuzzy filename search), `fff__grep` (content search), and `fff__multi_grep` (multi-pattern content search). The [search skill](skills/search/SEARCH.md) tells the agent to prefer these over shelling out to `grep`/`find` in a large repo. Because fff ships its own MCP server, the same install also benefits any Claude Code, Cursor, or Codex user (add `fff-mcp` to their MCP config), including alongside Hero Run's hosted MCP.
 
+## Secrets from your wallet, not .env files
+
+Your agent's API keys, tokens, and connection strings can live in your Hero vault: AES-sealed under a
+key derived from one wallet signature, stored server-side as ciphertext nobody can read. Your code
+then loads them at runtime instead of from `.env` files scattered across machines and repos.
+
+```js
+import { loadHeroEnv } from "hero-agent/src/vault.mjs";
+await loadHeroEnv();               // process.env now has your vault's variables
+```
+
+Or run anything with the vault injected, nothing written to disk:
+
+```bash
+hero-agent vault run -- node bot.mjs
+```
+
+Setup is one command. Two ways, depending on where the machine sits:
+
+```bash
+# On a machine you trust with a key file (used once, then not needed for secrets):
+hero-agent vault login --key-file ~/.hero-agent/my.key
+
+# On a server/CI box that should NEVER see your private key:
+#   herorunai.com/locker → Environment → "Connect a machine" → copy the token
+hero-agent vault login --token hvt1.0xYourAddr.0x…
+```
+
+Manage values from the CLI (`vault set NAME=value`, `ls`, `get`, `rm`, `env`) or the web UI at
+[herorunai.com/locker](https://herorunai.com/locker), same vault either way.
+
+The property that matters: the machine token can decrypt the vault, and that is all it can do. It
+cannot sign transactions, spend, or mint. A compromised box leaks secrets you can rotate, never the
+wallet you cannot. Every pull lands in the access log on /locker, so "what read my secrets, when"
+has an answer.
+
 ## Use it as a library
 
 ```js
