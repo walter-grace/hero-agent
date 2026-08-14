@@ -134,10 +134,20 @@ export function Chip({ children }) {
 }
 
 export function SysBlock({ title, lines, error }) {
+  if (error) {
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={EMBER} paddingX={1} marginTop={1}>
+        {title ? <Text bold color={EMBER}>✗ {title}</Text> : null}
+        {(lines || []).map((l, i) => (typeof l === "string" ? <Text key={i} color={PAPER}>{l}</Text> : <React.Fragment key={i}>{l}</React.Fragment>))}
+      </Box>
+    );
+  }
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={error ? EMBER : STONE} paddingX={1} marginTop={1}>
-      {title ? <Text bold color={error ? EMBER : STEEL}>{title}</Text> : null}
-      {(lines || []).map((l, i) => (typeof l === "string" ? <Text key={i} color={PAPER}>{l}</Text> : <React.Fragment key={i}>{l}</React.Fragment>))}
+    <Box flexDirection="column" marginTop={1}>
+      {title ? <Text bold color={STEEL}>◆ {title}</Text> : null}
+      {(lines || []).map((l, i) => (
+        <Box key={i} paddingLeft={2}>{typeof l === "string" ? <Text color={PAPER}>{l}</Text> : l}</Box>
+      ))}
     </Box>
   );
 }

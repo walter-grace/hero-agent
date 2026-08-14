@@ -83,17 +83,28 @@ export default function App({ version }) {
   }, [key]);
   useEffect(() => { refreshBal(); }, [refreshBal]);
 
-  // Vault boot: no key anywhere local, but this machine has a vault token → pull HERO_RUN_KEY from
-  // the wallet vault and skip the wizard. The TUI then needs zero env vars to start.
+  // Balance-aware key boot. The naive chain (env → key file → vault) once picked a drained key
+  // file (44 $HERO) over a funded vault key and greeted the user with an inference error. Now: if
+  // the local key is missing OR nearly empty, check the vault and take whichever key can actually
+  // pay for a reply.
   useEffect(() => {
-    if (!setup) return;
     let live = true;
-    vaultBootKey().then((k) => {
-      if (!live || !k) return;
-      setKey(k); setSetup(false);
-      sys("vault", "HERO_RUN_KEY loaded from your wallet vault. Zero local config.");
-      refreshBal(k);
-    }).catch(() => {});
+    (async () => {
+      try {
+        const cur = loadKey();
+        const curBal = cur ? (await keyInfo(cur).catch(() => null))?.balance ?? null : null;
+        if (live && curBal != null) setBal(curBal);
+        if (cur && (curBal == null || curBal >= 2000)) return; // local key is healthy; keep it
+        const vk = await vaultBootKey();
+        if (!live || !vk || vk === cur) return;
+        const vBal = (await keyInfo(vk).catch(() => null))?.balance ?? null;
+        if (vBal == null || (curBal != null && vBal <= curBal)) return;
+        setKey(vk); setSetup(false); setBal(vBal);
+        sys("vault", cur
+          ? `Saved key is nearly empty (${fmtHero(curBal)} $HERO) — switched to your wallet vault key: ${fmtHero(vBal)} $HERO ready.`
+          : "HERO_RUN_KEY loaded from your wallet vault. Zero local config.");
+      } catch {}
+    })();
     return () => { live = false; };
   }, []); // once, at boot
 
@@ -132,7 +143,14 @@ export default function App({ version }) {
       if (out.charged) { setSpent((s) => s + out.charged); setBal((b) => (b == null ? b : Math.max(0, b - out.charged))); }
     } catch (e) {
       if (e.name === "AbortError") sys("cancelled", "Response cancelled. The partial answer is discarded.", false);
-      else sys("inference error", e.message + (String(e.message).match(/balance|credit|insufficient|402|empty/i) ? `  ·  top up at ${BASE}/keys` : ""), true);
+      else if (String(e.message).match(/balance|credit|insufficient|402|empty/i)) {
+        const vk = await vaultBootKey().catch(() => null);
+        const vBal = vk && vk !== key ? (await keyInfo(vk).catch(() => null))?.balance ?? null : null;
+        if (vBal != null && vBal >= 2000) {
+          setKey(vk); setBal(vBal);
+          sys("vault", `That key is out of credits — switched to your wallet vault key (${fmtHero(vBal)} $HERO). Send that again.`);
+        } else sys("inference error", e.message + `  ·  top up at ${BASE}/keys`, true);
+      } else sys("inference error", e.message, true);
       convo.current.pop();
     } finally {
       setThinking(null); setLive(null); abortRef.current = null;
@@ -453,9 +471,9 @@ export default function App({ version }) {
       {overlay && <Picker title={overlay.title} items={filteredOverlay} filter={overlay.filter} sel={overlay.sel} />}
 
       {!overlay && (
-        <Box marginTop={1}>
-          <Text color={BRASS}>{setup ? "key " : ""}{"> "}</Text>
-          <Text>
+        <Box borderStyle="round" borderColor={thinking ? BRASS : STONE} paddingX={1} marginTop={1}>
+          <Text color={BRASS}>{setup ? "key ›" : "›"} </Text>
+          <Text wrap="truncate-start">
             {/* the key is masked while typing: terminals get screenshotted and screens get shared */}
             {(setup ? "•".repeat(Math.max(0, cursor)) : input.slice(0, cursor))}
             <Text inverse>{(setup ? (input[cursor] ? "•" : " ") : input[cursor] || " ")}</Text>
