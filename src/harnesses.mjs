@@ -3,8 +3,8 @@
 // never clobbered), the API key comes from env → key file → wallet vault, and the task is passed to
 // the harness's one-shot mode. The harness does the agenting; Hero Run does the thinking; the vault
 // does the secrets.
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { spawn, execSync } from "node:child_process";
 
@@ -47,6 +47,15 @@ export const HARNESSES = {
       return a || b ? p : null;
     },
     cmd: (task) => ["npx", ["--yes", "@deepseek-ai/dsh", "--profile", "headless", task]],
+    nativeCmd(task) {
+      // A throwaway patch overlay flips the default model back to DeepSeek's own route for this run
+      // only; the user's DEEPSEEK_API_KEY comes from env or the wallet vault.
+      const dir = mkdtempSync(join(tmpdir(), "dsh-native-"));
+      const p = join(dir, "native.yml");
+      writeFileSync(p, "agent-default-model:\n  provider: deepseek-official\n  model: deepseek-v4-flash\n");
+      return ["npx", ["--yes", "@deepseek-ai/dsh", "--profile", "headless", "--patch", p, task]];
+    },
+    nativeNeeds: "DEEPSEEK_API_KEY (store it once: hero-agent vault set DEEPSEEK_API_KEY=…)",
   },
 
   claude: {
@@ -60,6 +69,8 @@ export const HARNESSES = {
       ANTHROPIC_MODEL: model,
       CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1", // our catalog ids aren't in its model table
     }],
+    nativeCmd: (task) => ["claude", ["-p", task]], // the user's own `claude login` (Pro/Max) — no overrides
+    nativeNeeds: "a logged-in Claude Code (`claude login`)",
   },
 
   opencode: {
@@ -94,6 +105,9 @@ export const HARNESSES = {
       return p;
     },
     cmd: (task) => ["opencode", ["run", task]],
+    nativeCmd: (task) => ["opencode", ["run", task]],
+    nativeSkipsConfig: true, // native uses whatever the user's own opencode auth/config says
+    nativeNeeds: "opencode's own auth (`opencode auth login`)",
   },
 
   grok: {
@@ -113,17 +127,39 @@ default = "hero-run"
 `) ? p : null;
     },
     cmd: (task) => ["grok", ["-p", task]],
+    nativeCmd: (task) => ["grok", ["-p", task]],
+    nativeSkipsConfig: true,
+    nativeNeeds: "Grok Build's own login (xAI account)",
+  },
+
+  codex: {
+    label: "OpenAI Codex",
+    install: "npm i -g @openai/codex",
+    available: () => has("codex"),
+    heroBrain: false, // Codex speaks the OpenAI Responses API, which Hero Run does not serve — native only
+    ensureConfig() { return null; },
+    cmd() { throw new Error("Codex uses the OpenAI Responses API, which Hero Run doesn't serve. Run it on your own account: hero-agent harness codex \"task\" --brain native"); },
+    nativeCmd: (task) => ["codex", ["exec", task]],
+    nativeNeeds: "a logged-in Codex (`codex login`, ChatGPT account) or OPENAI_API_KEY (vault-settable)",
   },
 };
 
 // Launch: returns the child's exit code. `env` carries HERO_RUN_KEY (from the vault when needed).
-export async function runHarness(name, task, { model = "auto", key, extraEnv = {} } = {}) {
+export async function runHarness(name, task, { model = "auto", key, brain = "hero", extraEnv = {} } = {}) {
   const h = HARNESSES[name];
   if (!h) throw new Error(`Unknown harness "${name}". Try: ${Object.keys(HARNESSES).join(", ")}`);
   if (!h.available()) throw new Error(`${h.label} isn't installed. ${h.install}`);
-  const wrote = h.ensureConfig(model);
-  if (wrote) console.error(`✓ pointed ${h.label} at Hero Run (${wrote})`);
-  const [bin, args, envOverride] = h.cmd(task, model, key);
+  if (brain === "native" && !h.nativeCmd) throw new Error(`${h.label} has no native mode wired yet.`);
+  if (brain !== "native" && h.heroBrain === false) h.cmd(); // throws the honest explanation
+  let bin, args, envOverride;
+  if (brain === "native") {
+    console.error(`· brain: ${h.label}'s own account (needs ${h.nativeNeeds})`);
+    [bin, args, envOverride] = h.nativeCmd(task, model);
+  } else {
+    const wrote = h.nativeSkipsConfig && brain === "native" ? null : h.ensureConfig(model);
+    if (wrote) console.error(`✓ pointed ${h.label} at Hero Run (${wrote})`);
+    [bin, args, envOverride] = h.cmd(task, model, key);
+  }
   const env = { ...process.env, HERO_RUN_KEY: key, ...extraEnv, ...(envOverride || {}) };
   return new Promise((resolve) => {
     const child = spawn(bin, args, { stdio: "inherit", env });

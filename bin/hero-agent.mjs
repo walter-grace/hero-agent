@@ -112,7 +112,8 @@ async function main() {
       if (!sub || sub === "ls") {
         for (const [name, h] of Object.entries(HARNESSES))
           console.log(`  ${name.padEnd(10)} ${h.label.padEnd(18)} ${h.available() ? "✓ ready" : `✗ ${h.install}`}`);
-        console.log('\nUsage: hero-agent harness <name> "task" [--model auto|cheapest|<id>]');
+        console.log('\nUsage: hero-agent harness <name> "task" [--model auto|cheapest|<id>] [--brain hero|native]');
+        console.log("  --brain native uses the harness\'s OWN account (claude login / codex login / DEEPSEEK_API_KEY from the vault).");
         return;
       }
       const task = rest.slice(1).join(" ");
@@ -127,8 +128,16 @@ async function main() {
           if (key) console.error("✓ HERO_RUN_KEY loaded from your wallet vault");
         } catch {}
       }
-      if (!key) { console.error("No HERO_RUN_KEY found (env, key file, or vault). Mint one at https://herorunai.com/keys"); process.exit(1); }
-      process.exit(await runHarness(sub, task, { model: flag("model", "auto"), key }));
+      const brain = flag("brain", "hero");
+      if (!key && brain !== "native") { console.error("No HERO_RUN_KEY found (env, key file, or vault). Mint one at https://herorunai.com/keys — or use your own account: --brain native"); process.exit(1); }
+      // Native brains often need the harness's own API key (DEEPSEEK_API_KEY, OPENAI_API_KEY…).
+      // Inject EVERY vault secret at spawn, so accounts connected once in the vault just work.
+      let extraEnv = {};
+      try {
+        const V = await import("../src/vault.mjs");
+        if (V.vaultToken()) extraEnv = await V.secrets({ purpose: `harness ${sub} (${brain} brain)` });
+      } catch {}
+      process.exit(await runHarness(sub, task, { model: flag("model", "auto"), key, brain, extraEnv }));
     }
     // Secrets from your wallet, not .env files. `vault login` derives a read-only vault token (once,
     // from a key file OR a token pasted from the web UI, so a server never sees the private key);

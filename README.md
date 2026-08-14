@@ -223,6 +223,31 @@ hero-agent harness grok "profile this function"      # Grok Build
 does the thinking across 600+ models; the vault supplies the secrets. Verified live: dsh and Claude
 Code both answered through this command, billed in $HERO, key loaded from the wallet vault.
 
+### Bring your own accounts
+
+Already pay for Claude Pro, ChatGPT, or DeepSeek? `--brain native` runs the harness on its OWN
+account instead of Hero Run:
+
+```bash
+hero-agent harness claude "task" --brain native    # your `claude login` (Pro/Max)
+hero-agent harness codex  "task" --brain native    # your `codex login` (ChatGPT) — Codex is native-only
+hero-agent harness dsh    "task" --brain native    # your DeepSeek account
+```
+
+Connect each account once:
+
+| Harness | Connect with | Where it lives |
+|---|---|---|
+| Claude Code | `claude login` | its own keychain |
+| Codex | `codex login` (or `hero-agent vault set OPENAI_API_KEY=…`) | keychain / your wallet vault |
+| DeepSeek Harness | `hero-agent vault set DEEPSEEK_API_KEY=…` | your wallet vault |
+| OpenCode | `opencode auth login` | its own config |
+| Grok Build | its xAI login | its own config |
+
+Every vault secret is injected at spawn, so an API-key account stored once in the vault works from
+any machine with a vault token. Codex is native-only for now: it speaks the OpenAI Responses API,
+which Hero Run does not serve, and the CLI says so instead of failing cryptically.
+
 ## Secrets from your wallet, not .env files
 
 Your agent's API keys, tokens, and connection strings can live in your Hero vault: AES-sealed under a
