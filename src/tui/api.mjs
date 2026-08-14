@@ -299,7 +299,7 @@ export function localTools(cwd) {
 // One agent turn: /v1 with tools, loop until a plain answer. Non-streaming per step (tool_call
 // deltas over SSE are not worth the parse risk); the Thinking spinner + tool lines carry the feel.
 // approve(call) resolves true/false from the UI. Returns { text, costHero, steps }.
-export async function agentTurn({ key, model, messages, cwd, onTool, approve, signal, maxSteps = 6 }) {
+export async function agentTurn({ key, model, messages, cwd, onTool, approve, signal, maxSteps = 6, maxTokens = 1600 }) {
   const tools = localTools(cwd);
   tools.find((t) => t.def.function.name === "web_search").run = async ({ query }) => {
     const r = await fetch(`${BASE}/v1/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
@@ -329,7 +329,7 @@ export async function agentTurn({ key, model, messages, cwd, onTool, approve, si
     const last = hop === maxSteps;
     let r, d;
     for (let tries = 0; ; tries++) {
-      r = await call({ model, messages: msgs, max_tokens: 1600, ...(last ? {} : { tools: defs }) });
+      r = await call({ model, messages: msgs, max_tokens: maxTokens, ...(last ? {} : { tools: defs }) });
       d = await r.json();
       if (r.ok) break;
       // Rate limits retry THIS request in place: prior hops stay paid-for exactly once. (The old

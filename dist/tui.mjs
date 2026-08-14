@@ -980,7 +980,7 @@ function localTools(cwd) {
     }
   ];
 }
-async function agentTurn({ key, model, messages, cwd, onTool, approve, signal, maxSteps = 6 }) {
+async function agentTurn({ key, model, messages, cwd, onTool, approve, signal, maxSteps = 6, maxTokens = 1600 }) {
   const tools = localTools(cwd);
   tools.find((t) => t.def.function.name === "web_search").run = async ({ query }) => {
     const r = await fetch(`${BASE2}/v1/chat/completions`, {
@@ -1014,7 +1014,7 @@ async function agentTurn({ key, model, messages, cwd, onTool, approve, signal, m
     const last = hop === maxSteps;
     let r, d;
     for (let tries = 0; ; tries++) {
-      r = await call2({ model, messages: msgs, max_tokens: 1600, ...last ? {} : { tools: defs } });
+      r = await call2({ model, messages: msgs, max_tokens: maxTokens, ...last ? {} : { tools: defs } });
       d = await r.json();
       if (r.ok) break;
       if (r.status === 429 || /quota|too_many/i.test(d.error?.message || "")) {
