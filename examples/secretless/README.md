@@ -44,6 +44,24 @@ hero-agent vault run -- node bot.mjs
 hero-agent vault run -- python train.py
 ```
 
+## Two ways to leverage it
+
+`bot.mjs` loads the vault IN code (`loadHeroEnv()`). `brief.mjs` is the other path: an ordinary
+script that reads `process.env` and has no idea the vault exists — wrap it and secrets arrive at
+spawn:
+
+```bash
+hero-agent vault run -- node brief.mjs
+```
+
+```
+── morning brief ──
+Catalog holds 646 models; newest arrival is Dots3-Note Preview (free).
+Treasury claimable: 934,499,443 HERO.
+```
+
+Your existing bots, cron jobs, and Python scripts work unmodified. The wrapper is the migration.
+
 ## Why this beats a .env file
 
 The token in `vault-token.json` can decrypt the vault. That is the complete list of its powers: it
