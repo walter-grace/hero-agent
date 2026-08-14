@@ -26,6 +26,8 @@ const COMMANDS = [
   { name: "/key", desc: "set a new hr_live_ inference key" },
   { name: "/vault", desc: "wallet secrets: ls · set N=V · get N · rm N · login <token>" },
   { name: "/tools", desc: "toggle agent mode (shell, files, web search with y/n approval)" },
+  { name: "/auto", desc: "auto-approve every tool, no prompts (this session)" },
+  { name: "/turbo", desc: "swap to Cerebras speed: gpt-oss-120b@cerebras (~0.5s replies)" },
   { name: "/clear", desc: "clear the conversation" },
   { name: "/exit", desc: "leave" },
 ];
@@ -74,6 +76,8 @@ export default function App({ version }) {
   const [toolsOn, setToolsOn] = useState(true);       // agent mode: shell/files/web with approval
   const [pendingTool, setPendingTool] = useState(null); // { name, args, resolve } awaiting y/a/n
   const alwaysRef = useRef(new Set());                // tool names auto-approved this session
+  const autoRef = useRef(false);                      // /auto: approve every tool, no prompts
+  const preTurboRef = useRef(null);                   // model to restore when /turbo toggles off
 
   const slashOpen = !setup && !overlay && input.startsWith("/") && !input.includes(" ");
   const slashItems = slashOpen ? COMMANDS.filter((c) => c.name.startsWith(input.trim())) : [];
@@ -134,7 +138,7 @@ export default function App({ version }) {
           messages: [{ role: "system", content: sysPrompt }, ...convo.current.slice(-24)],
           onTool: (name, args) => push({ kind: "sys", title: null, lines: [`· ${name}(${JSON.stringify(args).slice(0, 90)})`], error: false }),
           approve: (name, args) => new Promise((resolveA) => {
-            if (alwaysRef.current.has(name)) return resolveA(true);
+            if (autoRef.current || alwaysRef.current.has(name)) return resolveA(true);
             setPendingTool({ name, args, resolve: resolveA });
           }),
         });
@@ -320,6 +324,26 @@ export default function App({ version }) {
           const r = await sendChannel(id, text);
           sys("sent", [`Message written to channel #${id} as ${r.mode === "room" ? "a members-only room entry 🔒" : "a public entry"}.`, `tx ${r.hash}`]);
         }).catch((e) => sys("send", String(e.message).includes("not authorized") ? "The contract rejected the write. Ask the owner to approve your wallet." : e.message, true));
+        break;
+      }
+      case "/auto": {
+        autoRef.current = !autoRef.current;
+        sys("auto", autoRef.current
+          ? "Auto mode ON: every tool runs without asking, shell included. /auto again to turn it off."
+          : "Auto mode OFF: shell and write_file ask again.");
+        break;
+      }
+      case "/turbo": {
+        const TURBO = "openai/gpt-oss-120b@cerebras";
+        if (model === TURBO) {
+          const backTo = preTurboRef.current || "auto";
+          setModel(backTo); saveSettings({ model: backTo });
+          sys("turbo", `Turbo off. Back to ${backTo}.`);
+        } else {
+          preTurboRef.current = model;
+          setModel(TURBO); saveSettings({ model: TURBO });
+          sys("turbo", "Turbo ON: gpt-oss-120b pinned to Cerebras (~0.5s replies). /turbo again to switch back.");
+        }
         break;
       }
       case "/tools": {
@@ -545,7 +569,7 @@ export default function App({ version }) {
           {bal != null ? ` · ⬡ ${fmtHero(bal)} $HERO` : ""}
           {agentId ? ` · agent #${agentId}` : ""}
           {spent > 0 ? ` · session ${fmtHero(spent)}` : ""}
-          {toolsOn ? " · tools" : ""}
+          {toolsOn ? (autoRef.current ? " · tools(auto)" : " · tools") : ""}
           {hasWallet() ? "" : " · no wallet (memory off)"}
           {cols >= 90 ? " · enter send · esc cancel · /help" : ""}
         </Text>

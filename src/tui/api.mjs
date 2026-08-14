@@ -307,10 +307,23 @@ export async function agentTurn({ key, model, messages, cwd, onTool, approve, si
   const defs = tools.map((t) => t.def);
   const msgs = [...messages];
   let cost = 0, steps = 0;
+  const call = async (body) => {
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000);
+        return await fetch(`${BASE}/v1/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(body), signal: sig });
+      } catch (e) {
+        if (e.name === "AbortError" && signal?.aborted) throw e; // user cancelled: stop immediately
+        lastErr = e;
+        await new Promise((res) => setTimeout(res, 800 * (attempt + 1)));
+      }
+    }
+    throw new Error(`network: ${lastErr?.cause?.code || lastErr?.message || "fetch failed"} (3 attempts)`);
+  };
   for (let hop = 0; hop <= maxSteps; hop++) {
     const last = hop === maxSteps;
-    const r = await fetch(`${BASE}/v1/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model, messages: msgs, max_tokens: 1600, ...(last ? {} : { tools: defs }) }), signal });
+    const r = await call({ model, messages: msgs, max_tokens: 1600, ...(last ? {} : { tools: defs }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error?.message || `request failed (${r.status})`);
     const msg = d.choices?.[0]?.message || {};

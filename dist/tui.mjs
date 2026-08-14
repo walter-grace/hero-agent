@@ -994,34 +994,43 @@ async function agentTurn({ key, model, messages, cwd, onTool, approve, signal, m
   const defs = tools.map((t) => t.def);
   const msgs = [...messages];
   let cost = 0, steps = 0;
+  const call2 = async (body) => {
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(18e4)]) : AbortSignal.timeout(18e4);
+        return await fetch(`${BASE2}/v1/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(body), signal: sig });
+      } catch (e) {
+        if (e.name === "AbortError" && signal?.aborted) throw e;
+        lastErr = e;
+        await new Promise((res) => setTimeout(res, 800 * (attempt + 1)));
+      }
+    }
+    throw new Error(`network: ${lastErr?.cause?.code || lastErr?.message || "fetch failed"} (3 attempts)`);
+  };
   for (let hop = 0; hop <= maxSteps; hop++) {
     const last = hop === maxSteps;
-    const r = await fetch(`${BASE2}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model, messages: msgs, max_tokens: 1600, ...last ? {} : { tools: defs } }),
-      signal
-    });
+    const r = await call2({ model, messages: msgs, max_tokens: 1600, ...last ? {} : { tools: defs } });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error?.message || `request failed (${r.status})`);
     const msg = d.choices?.[0]?.message || {};
     cost += Number(msg.x_hero?.charged_hero || d.x_hero?.charged_hero || 0);
     if (!msg.tool_calls?.length) return { text: (msg.content || "").trim(), costHero: cost, steps, model: msg.x_hero?.resolved_model || d.x_hero?.resolved_model };
     msgs.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
-    for (const call2 of msg.tool_calls) {
-      const tool = tools.find((t) => t.def.function.name === call2.function.name);
+    for (const call3 of msg.tool_calls) {
+      const tool = tools.find((t) => t.def.function.name === call3.function.name);
       let args = {};
       try {
-        args = JSON.parse(call2.function.arguments || "{}");
+        args = JSON.parse(call3.function.arguments || "{}");
       } catch {
       }
       steps++;
-      onTool?.(call2.function.name, args);
+      onTool?.(call3.function.name, args);
       let out;
-      if (!tool) out = `unknown tool: ${call2.function.name}`;
-      else if (tool.needsApproval && !await approve(call2.function.name, args)) out = "The user declined this action. Continue without it, or explain what you need.";
+      if (!tool) out = `unknown tool: ${call3.function.name}`;
+      else if (tool.needsApproval && !await approve(call3.function.name, args)) out = "The user declined this action. Continue without it, or explain what you need.";
       else out = await tool.run(args).catch((e) => `tool error: ${e.message}`);
-      msgs.push({ role: "tool", tool_call_id: call2.id, content: String(out).slice(0, 6e3) });
+      msgs.push({ role: "tool", tool_call_id: call3.id, content: String(out).slice(0, 6e3) });
     }
   }
 }
@@ -1043,6 +1052,8 @@ var COMMANDS = [
   { name: "/key", desc: "set a new hr_live_ inference key" },
   { name: "/vault", desc: "wallet secrets: ls \xB7 set N=V \xB7 get N \xB7 rm N \xB7 login <token>" },
   { name: "/tools", desc: "toggle agent mode (shell, files, web search with y/n approval)" },
+  { name: "/auto", desc: "auto-approve every tool, no prompts (this session)" },
+  { name: "/turbo", desc: "swap to Cerebras speed: gpt-oss-120b@cerebras (~0.5s replies)" },
   { name: "/clear", desc: "clear the conversation" },
   { name: "/exit", desc: "leave" }
 ];
@@ -1080,6 +1091,8 @@ function App({ version: version2 }) {
   const [toolsOn, setToolsOn] = useState2(true);
   const [pendingTool, setPendingTool] = useState2(null);
   const alwaysRef = useRef(/* @__PURE__ */ new Set());
+  const autoRef = useRef(false);
+  const preTurboRef = useRef(null);
   const slashOpen = !setup && !overlay && input.startsWith("/") && !input.includes(" ");
   const slashItems = slashOpen ? COMMANDS.filter((c) => c.name.startsWith(input.trim())) : [];
   const [slashSel, setSlashSel] = useState2(0);
@@ -1140,7 +1153,7 @@ function App({ version: version2 }) {
           messages: [{ role: "system", content: sysPrompt }, ...convo.current.slice(-24)],
           onTool: (name, args) => push({ kind: "sys", title: null, lines: [`\xB7 ${name}(${JSON.stringify(args).slice(0, 90)})`], error: false }),
           approve: (name, args) => new Promise((resolveA) => {
-            if (alwaysRef.current.has(name)) return resolveA(true);
+            if (autoRef.current || alwaysRef.current.has(name)) return resolveA(true);
             setPendingTool({ name, args, resolve: resolveA });
           })
         });
@@ -1391,6 +1404,26 @@ function App({ version: version2 }) {
           const r = await sendChannel(id, text);
           sys("sent", [`Message written to channel #${id} as ${r.mode === "room" ? "a members-only room entry \u{1F512}" : "a public entry"}.`, `tx ${r.hash}`]);
         }).catch((e) => sys("send", String(e.message).includes("not authorized") ? "The contract rejected the write. Ask the owner to approve your wallet." : e.message, true));
+        break;
+      }
+      case "/auto": {
+        autoRef.current = !autoRef.current;
+        sys("auto", autoRef.current ? "Auto mode ON: every tool runs without asking, shell included. /auto again to turn it off." : "Auto mode OFF: shell and write_file ask again.");
+        break;
+      }
+      case "/turbo": {
+        const TURBO = "openai/gpt-oss-120b@cerebras";
+        if (model === TURBO) {
+          const backTo = preTurboRef.current || "auto";
+          setModel(backTo);
+          saveSettings({ model: backTo });
+          sys("turbo", `Turbo off. Back to ${backTo}.`);
+        } else {
+          preTurboRef.current = model;
+          setModel(TURBO);
+          saveSettings({ model: TURBO });
+          sys("turbo", "Turbo ON: gpt-oss-120b pinned to Cerebras (~0.5s replies). /turbo again to switch back.");
+        }
         break;
       }
       case "/tools": {
@@ -1659,7 +1692,7 @@ function App({ version: version2 }) {
       bal != null ? ` \xB7 \u2B21 ${fmtHero(bal)} $HERO` : "",
       agentId ? ` \xB7 agent #${agentId}` : "",
       spent > 0 ? ` \xB7 session ${fmtHero(spent)}` : "",
-      toolsOn ? " \xB7 tools" : "",
+      toolsOn ? autoRef.current ? " \xB7 tools(auto)" : " \xB7 tools" : "",
       hasWallet() ? "" : " \xB7 no wallet (memory off)",
       cols >= 90 ? " \xB7 enter send \xB7 esc cancel \xB7 /help" : ""
     ] }) })
