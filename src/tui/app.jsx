@@ -8,7 +8,7 @@ import { BRASS, MINERAL, STEEL, STONE, EMBER, PAPER } from "./theme.mjs";
 import {
   loadKey, saveKey, keyInfo, loadSettings, saveSettings, listModels, streamChat,
   walletInfo, hasWallet, listAgents, readMemory, writeMemory, readChannel, sendChannel, BASE,
-  vaultBootKey, vaultOps,
+  vaultBootKey, vaultOps, agentTurn,
 } from "./api.mjs";
 
 const COMMANDS = [
@@ -25,6 +25,7 @@ const COMMANDS = [
   { name: "/stats", desc: "this session: turns, tokens, speed, spend" },
   { name: "/key", desc: "set a new hr_live_ inference key" },
   { name: "/vault", desc: "wallet secrets: ls · set N=V · get N · rm N · login <token>" },
+  { name: "/tools", desc: "toggle agent mode (shell, files, web search with y/n approval)" },
   { name: "/clear", desc: "clear the conversation" },
   { name: "/exit", desc: "leave" },
 ];
@@ -70,6 +71,9 @@ export default function App({ version }) {
   const abortRef = useRef(null);
   const [overlay, setOverlay] = useState(null);      // {title, items, filter, sel, onPick}
   const [setup, setSetup] = useState(!loadKey());    // first-run key wizard
+  const [toolsOn, setToolsOn] = useState(true);       // agent mode: shell/files/web with approval
+  const [pendingTool, setPendingTool] = useState(null); // { name, args, resolve } awaiting y/a/n
+  const alwaysRef = useRef(new Set());                // tool names auto-approved this session
 
   const slashOpen = !setup && !overlay && input.startsWith("/") && !input.includes(" ");
   const slashItems = slashOpen ? COMMANDS.filter((c) => c.name.startsWith(input.trim())) : [];
@@ -121,6 +125,30 @@ export default function App({ version }) {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
+      if (toolsOn) {
+        // Agent mode: the terminal-agent loop. Tool lines land in the transcript as they happen;
+        // risky calls suspend on the approval gate until y/a/n.
+        const sysPrompt = `You are Hero, a terminal agent on the user's macOS machine. Working directory: ${process.cwd()}. You have tools: shell (run commands), read_file, write_file, web_search. LOOK instead of guessing: when asked about files, the system, or anything on this machine, use the tools. Be concise; answer in markdown; never invent command output.`;
+        const out = await agentTurn({
+          key, model, cwd: process.cwd(), signal: ctrl.signal,
+          messages: [{ role: "system", content: sysPrompt }, ...convo.current.slice(-24)],
+          onTool: (name, args) => push({ kind: "sys", title: null, lines: [`· ${name}(${JSON.stringify(args).slice(0, 90)})`], error: false }),
+          approve: (name, args) => new Promise((resolveA) => {
+            if (alwaysRef.current.has(name)) return resolveA(true);
+            setPendingTool({ name, args, resolve: resolveA });
+          }),
+        });
+        convo.current.push({ role: "assistant", content: out.text });
+        const secs = (Date.now() - startedAt) / 1000;
+        const st = statsRef.current;
+        st.turns += 1; st.seconds += secs;
+        push({
+          kind: "assistant", text: out.text,
+          meta: { model: out.model || model, cost: out.costHero ? `${fmtHero(out.costHero)} $HERO` : "", secs: secs.toFixed(1), tps: null },
+        });
+        if (out.costHero) { setSpent((s) => s + out.costHero); setBal((b) => (b == null ? b : Math.max(0, b - out.costHero))); }
+        return;
+      }
       let first = true;
       const out = await streamChat({
         key, model, messages: convo.current.slice(-24), signal: ctrl.signal,
@@ -155,7 +183,7 @@ export default function App({ version }) {
     } finally {
       setThinking(null); setLive(null); abortRef.current = null;
     }
-  }, [key, model, push, sys]);
+  }, [key, model, toolsOn, push, sys]);
 
   // ---- commands ----
   const runCommand = useCallback(async (raw) => {
@@ -294,6 +322,11 @@ export default function App({ version }) {
         }).catch((e) => sys("send", String(e.message).includes("not authorized") ? "The contract rejected the write. Ask the owner to approve your wallet." : e.message, true));
         break;
       }
+      case "/tools": {
+        setToolsOn((t) => !t);
+        sys("tools", toolsOn ? "Agent mode OFF. Plain streamed chat, no tools." : "Agent mode ON. shell and write_file ask before running; reads and web search are automatic.");
+        break;
+      }
       case "/vault": {
         const sub = args[0];
         const V = await vaultOps();
@@ -330,6 +363,14 @@ export default function App({ version }) {
 
   // ---- input handling ----
   useInput((ch, k) => {
+    // approval gate owns the keyboard while a tool waits: y = once, a = always this session, n/esc = no
+    if (pendingTool) {
+      const c = (ch || "").toLowerCase();
+      if (c === "y" || k.return) { pendingTool.resolve(true); setPendingTool(null); }
+      else if (c === "a") { alwaysRef.current.add(pendingTool.name); pendingTool.resolve(true); setPendingTool(null); }
+      else if (c === "n" || k.escape) { pendingTool.resolve(false); setPendingTool(null); }
+      return;
+    }
     // overlay picker owns the keyboard while open
     if (overlay) {
       const filtered = overlay.all.filter((it) => it.label.toLowerCase().includes(overlay.filter.toLowerCase()));
@@ -470,6 +511,13 @@ export default function App({ version }) {
 
       {overlay && <Picker title={overlay.title} items={filteredOverlay} filter={overlay.filter} sel={overlay.sel} />}
 
+      {pendingTool && (
+        <Box borderStyle="round" borderColor={BRASS} paddingX={1} marginTop={1} flexDirection="column">
+          <Text bold color={BRASS}>{pendingTool.name} wants to run</Text>
+          <Text color={PAPER} wrap="truncate-end">  {pendingTool.name === "shell" ? String(pendingTool.args.cmd || "") : JSON.stringify(pendingTool.args).slice(0, 200)}</Text>
+          <Text color={STONE}>  (y)es once · (a)lways this session · (n)o</Text>
+        </Box>
+      )}
       {!overlay && (
         <Box borderStyle="round" borderColor={thinking ? BRASS : STONE} paddingX={1} marginTop={1}>
           <Text color={BRASS}>{setup ? "key ›" : "›"} </Text>
@@ -497,6 +545,7 @@ export default function App({ version }) {
           {bal != null ? ` · ⬡ ${fmtHero(bal)} $HERO` : ""}
           {agentId ? ` · agent #${agentId}` : ""}
           {spent > 0 ? ` · session ${fmtHero(spent)}` : ""}
+          {toolsOn ? " · tools" : ""}
           {hasWallet() ? "" : " · no wallet (memory off)"}
           {cols >= 90 ? " · enter send · esc cancel · /help" : ""}
         </Text>

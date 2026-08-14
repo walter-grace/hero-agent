@@ -252,3 +252,81 @@ export async function sendChannel(agentId, text) {
   await mem.pub.waitForTransactionReceipt({ hash }).catch(() => {});
   return { mode: "public", hash };
 }
+
+// ---- agent mode: local tools with approval gates (the PicoClaw spirit, Hero rails) ----
+// The TUI stops being a chat client and becomes a terminal agent: shell, files, and web search on
+// the REAL machine, every risky call gated by an explicit y/n in the UI. Reads are auto-allowed;
+// anything that executes or writes asks first.
+import { exec as _exec } from "node:child_process";
+import { readFile as _readFile, writeFile as _writeFile } from "node:fs/promises";
+import { resolve as _resolvePath } from "node:path";
+
+const sh = (cmd, cwd) => new Promise((res) => {
+  _exec(cmd, { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    res(`exit ${err?.code ?? 0}\n--- stdout ---\n${String(stdout).slice(0, 4000)}\n--- stderr ---\n${String(stderr).slice(0, 2000)}`);
+  });
+});
+
+export function localTools(cwd) {
+  return [
+    { needsApproval: true, def: { type: "function", function: {
+        name: "shell",
+        description: "Run a shell command on the user's machine (30s timeout) and return stdout/stderr/exit code.",
+        parameters: { type: "object", properties: { cmd: { type: "string" } }, required: ["cmd"] } } },
+      run: ({ cmd }) => sh(String(cmd || ""), cwd) },
+    { needsApproval: false, def: { type: "function", function: {
+        name: "read_file",
+        description: "Read a text file (absolute path or relative to the working directory).",
+        parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } } },
+      run: async ({ path }) => (await _readFile(_resolvePath(cwd, String(path)), "utf8")).slice(0, 8000) },
+    { needsApproval: true, def: { type: "function", function: {
+        name: "write_file",
+        description: "Write or overwrite a text file (absolute path or relative to the working directory).",
+        parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } } },
+      run: async ({ path, content }) => { await _writeFile(_resolvePath(cwd, String(path)), String(content ?? "")); return `wrote ${path} (${String(content ?? "").length} bytes)`; } },
+    { needsApproval: false, def: { type: "function", function: {
+        name: "web_search",
+        description: "Search the live web for current information.",
+        parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } } },
+      run: null /* filled by agentTurn: routed through /v1 sonar on the same key */ },
+  ];
+}
+
+// One agent turn: /v1 with tools, loop until a plain answer. Non-streaming per step (tool_call
+// deltas over SSE are not worth the parse risk); the Thinking spinner + tool lines carry the feel.
+// approve(call) resolves true/false from the UI. Returns { text, costHero, steps }.
+export async function agentTurn({ key, model, messages, cwd, onTool, approve, signal, maxSteps = 6 }) {
+  const tools = localTools(cwd);
+  tools.find((t) => t.def.function.name === "web_search").run = async ({ query }) => {
+    const r = await fetch(`${BASE}/v1/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: "perplexity/sonar-pro", max_tokens: 700, messages: [{ role: "user", content: String(query || "") }] }), signal });
+    const d = await r.json();
+    if (!r.ok) return `search failed: ${d.error?.message || r.status}`;
+    return d.choices?.[0]?.message?.content || "(no results)";
+  };
+  const defs = tools.map((t) => t.def);
+  const msgs = [...messages];
+  let cost = 0, steps = 0;
+  for (let hop = 0; hop <= maxSteps; hop++) {
+    const last = hop === maxSteps;
+    const r = await fetch(`${BASE}/v1/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, messages: msgs, max_tokens: 1600, ...(last ? {} : { tools: defs }) }), signal });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error?.message || `request failed (${r.status})`);
+    const msg = d.choices?.[0]?.message || {};
+    cost += Number(msg.x_hero?.charged_hero || d.x_hero?.charged_hero || 0);
+    if (!msg.tool_calls?.length) return { text: (msg.content || "").trim(), costHero: cost, steps, model: msg.x_hero?.resolved_model || d.x_hero?.resolved_model };
+    msgs.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
+    for (const call of msg.tool_calls) {
+      const tool = tools.find((t) => t.def.function.name === call.function.name);
+      let args = {}; try { args = JSON.parse(call.function.arguments || "{}"); } catch {}
+      steps++;
+      onTool?.(call.function.name, args);
+      let out;
+      if (!tool) out = `unknown tool: ${call.function.name}`;
+      else if (tool.needsApproval && !(await approve(call.function.name, args))) out = "The user declined this action. Continue without it, or explain what you need.";
+      else out = await tool.run(args).catch((e) => `tool error: ${e.message}`);
+      msgs.push({ role: "tool", tool_call_id: call.id, content: String(out).slice(0, 6000) });
+    }
+  }
+}

@@ -665,6 +665,9 @@ import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, mkdirSy
 import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
+import { exec as _exec } from "node:child_process";
+import { readFile as _readFile, writeFile as _writeFile } from "node:fs/promises";
+import { resolve as _resolvePath } from "node:path";
 var BASE2 = process.env.HERO_RUN_BASE || "https://herorunai.com";
 var DIR = join2(homedir2(), ".hero-agent");
 var KEY_FILE = join2(DIR, "hero-run-key.txt");
@@ -922,6 +925,106 @@ async function sendChannel(agentId, text) {
   });
   return { mode: "public", hash };
 }
+var sh = (cmd, cwd) => new Promise((res) => {
+  _exec(cmd, { cwd, timeout: 3e4, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    res(`exit ${err?.code ?? 0}
+--- stdout ---
+${String(stdout).slice(0, 4e3)}
+--- stderr ---
+${String(stderr).slice(0, 2e3)}`);
+  });
+});
+function localTools(cwd) {
+  return [
+    {
+      needsApproval: true,
+      def: { type: "function", function: {
+        name: "shell",
+        description: "Run a shell command on the user's machine (30s timeout) and return stdout/stderr/exit code.",
+        parameters: { type: "object", properties: { cmd: { type: "string" } }, required: ["cmd"] }
+      } },
+      run: ({ cmd }) => sh(String(cmd || ""), cwd)
+    },
+    {
+      needsApproval: false,
+      def: { type: "function", function: {
+        name: "read_file",
+        description: "Read a text file (absolute path or relative to the working directory).",
+        parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] }
+      } },
+      run: async ({ path }) => (await _readFile(_resolvePath(cwd, String(path)), "utf8")).slice(0, 8e3)
+    },
+    {
+      needsApproval: true,
+      def: { type: "function", function: {
+        name: "write_file",
+        description: "Write or overwrite a text file (absolute path or relative to the working directory).",
+        parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] }
+      } },
+      run: async ({ path, content }) => {
+        await _writeFile(_resolvePath(cwd, String(path)), String(content ?? ""));
+        return `wrote ${path} (${String(content ?? "").length} bytes)`;
+      }
+    },
+    {
+      needsApproval: false,
+      def: { type: "function", function: {
+        name: "web_search",
+        description: "Search the live web for current information.",
+        parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }
+      } },
+      run: null
+      /* filled by agentTurn: routed through /v1 sonar on the same key */
+    }
+  ];
+}
+async function agentTurn({ key, model, messages, cwd, onTool, approve, signal, maxSteps = 6 }) {
+  const tools = localTools(cwd);
+  tools.find((t) => t.def.function.name === "web_search").run = async ({ query }) => {
+    const r = await fetch(`${BASE2}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: "perplexity/sonar-pro", max_tokens: 700, messages: [{ role: "user", content: String(query || "") }] }),
+      signal
+    });
+    const d = await r.json();
+    if (!r.ok) return `search failed: ${d.error?.message || r.status}`;
+    return d.choices?.[0]?.message?.content || "(no results)";
+  };
+  const defs = tools.map((t) => t.def);
+  const msgs = [...messages];
+  let cost = 0, steps = 0;
+  for (let hop = 0; hop <= maxSteps; hop++) {
+    const last = hop === maxSteps;
+    const r = await fetch(`${BASE2}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, messages: msgs, max_tokens: 1600, ...last ? {} : { tools: defs } }),
+      signal
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error?.message || `request failed (${r.status})`);
+    const msg = d.choices?.[0]?.message || {};
+    cost += Number(msg.x_hero?.charged_hero || d.x_hero?.charged_hero || 0);
+    if (!msg.tool_calls?.length) return { text: (msg.content || "").trim(), costHero: cost, steps, model: msg.x_hero?.resolved_model || d.x_hero?.resolved_model };
+    msgs.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
+    for (const call2 of msg.tool_calls) {
+      const tool = tools.find((t) => t.def.function.name === call2.function.name);
+      let args = {};
+      try {
+        args = JSON.parse(call2.function.arguments || "{}");
+      } catch {
+      }
+      steps++;
+      onTool?.(call2.function.name, args);
+      let out;
+      if (!tool) out = `unknown tool: ${call2.function.name}`;
+      else if (tool.needsApproval && !await approve(call2.function.name, args)) out = "The user declined this action. Continue without it, or explain what you need.";
+      else out = await tool.run(args).catch((e) => `tool error: ${e.message}`);
+      msgs.push({ role: "tool", tool_call_id: call2.id, content: String(out).slice(0, 6e3) });
+    }
+  }
+}
 
 // src/tui/app.jsx
 import { jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
@@ -939,6 +1042,7 @@ var COMMANDS = [
   { name: "/stats", desc: "this session: turns, tokens, speed, spend" },
   { name: "/key", desc: "set a new hr_live_ inference key" },
   { name: "/vault", desc: "wallet secrets: ls \xB7 set N=V \xB7 get N \xB7 rm N \xB7 login <token>" },
+  { name: "/tools", desc: "toggle agent mode (shell, files, web search with y/n approval)" },
   { name: "/clear", desc: "clear the conversation" },
   { name: "/exit", desc: "leave" }
 ];
@@ -973,6 +1077,9 @@ function App({ version: version2 }) {
   const abortRef = useRef(null);
   const [overlay, setOverlay] = useState2(null);
   const [setup, setSetup] = useState2(!loadKey());
+  const [toolsOn, setToolsOn] = useState2(true);
+  const [pendingTool, setPendingTool] = useState2(null);
+  const alwaysRef = useRef(/* @__PURE__ */ new Set());
   const slashOpen = !setup && !overlay && input.startsWith("/") && !input.includes(" ");
   const slashItems = slashOpen ? COMMANDS.filter((c) => c.name.startsWith(input.trim())) : [];
   const [slashSel, setSlashSel] = useState2(0);
@@ -1023,6 +1130,36 @@ function App({ version: version2 }) {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
+      if (toolsOn) {
+        const sysPrompt = `You are Hero, a terminal agent on the user's macOS machine. Working directory: ${process.cwd()}. You have tools: shell (run commands), read_file, write_file, web_search. LOOK instead of guessing: when asked about files, the system, or anything on this machine, use the tools. Be concise; answer in markdown; never invent command output.`;
+        const out2 = await agentTurn({
+          key,
+          model,
+          cwd: process.cwd(),
+          signal: ctrl.signal,
+          messages: [{ role: "system", content: sysPrompt }, ...convo.current.slice(-24)],
+          onTool: (name, args) => push({ kind: "sys", title: null, lines: [`\xB7 ${name}(${JSON.stringify(args).slice(0, 90)})`], error: false }),
+          approve: (name, args) => new Promise((resolveA) => {
+            if (alwaysRef.current.has(name)) return resolveA(true);
+            setPendingTool({ name, args, resolve: resolveA });
+          })
+        });
+        convo.current.push({ role: "assistant", content: out2.text });
+        const secs = (Date.now() - startedAt) / 1e3;
+        const st2 = statsRef.current;
+        st2.turns += 1;
+        st2.seconds += secs;
+        push({
+          kind: "assistant",
+          text: out2.text,
+          meta: { model: out2.model || model, cost: out2.costHero ? `${fmtHero(out2.costHero)} $HERO` : "", secs: secs.toFixed(1), tps: null }
+        });
+        if (out2.costHero) {
+          setSpent((s) => s + out2.costHero);
+          setBal((b) => b == null ? b : Math.max(0, b - out2.costHero));
+        }
+        return;
+      }
       let first = true;
       const out = await streamChat({
         key,
@@ -1072,7 +1209,7 @@ function App({ version: version2 }) {
       setLive(null);
       abortRef.current = null;
     }
-  }, [key, model, push, sys]);
+  }, [key, model, toolsOn, push, sys]);
   const runCommand = useCallback(async (raw) => {
     const [cmd, ...args] = raw.trim().split(/\s+/);
     const arg = args.join(" ");
@@ -1256,6 +1393,11 @@ function App({ version: version2 }) {
         }).catch((e) => sys("send", String(e.message).includes("not authorized") ? "The contract rejected the write. Ask the owner to approve your wallet." : e.message, true));
         break;
       }
+      case "/tools": {
+        setToolsOn((t) => !t);
+        sys("tools", toolsOn ? "Agent mode OFF. Plain streamed chat, no tools." : "Agent mode ON. shell and write_file ask before running; reads and web search are automatic.");
+        break;
+      }
       case "/vault": {
         const sub = args[0];
         const V = await vaultOps();
@@ -1311,6 +1453,21 @@ function App({ version: version2 }) {
     }
   }, [key, model, agentId, spent, exit, sys, push]);
   useInput((ch, k) => {
+    if (pendingTool) {
+      const c = (ch || "").toLowerCase();
+      if (c === "y" || k.return) {
+        pendingTool.resolve(true);
+        setPendingTool(null);
+      } else if (c === "a") {
+        alwaysRef.current.add(pendingTool.name);
+        pendingTool.resolve(true);
+        setPendingTool(null);
+      } else if (c === "n" || k.escape) {
+        pendingTool.resolve(false);
+        setPendingTool(null);
+      }
+      return;
+    }
     if (overlay) {
       const filtered = overlay.all.filter((it) => it.label.toLowerCase().includes(overlay.filter.toLowerCase()));
       if (k.escape) return setOverlay(null);
@@ -1471,6 +1628,17 @@ function App({ version: version2 }) {
     ] }),
     thinking && /* @__PURE__ */ jsx2(Box2, { marginTop: 1, children: /* @__PURE__ */ jsx2(Thinking, { startedAt: thinking.startedAt, note: thinking.note }) }),
     overlay && /* @__PURE__ */ jsx2(Picker, { title: overlay.title, items: filteredOverlay, filter: overlay.filter, sel: overlay.sel }),
+    pendingTool && /* @__PURE__ */ jsxs2(Box2, { borderStyle: "round", borderColor: BRASS, paddingX: 1, marginTop: 1, flexDirection: "column", children: [
+      /* @__PURE__ */ jsxs2(Text2, { bold: true, color: BRASS, children: [
+        pendingTool.name,
+        " wants to run"
+      ] }),
+      /* @__PURE__ */ jsxs2(Text2, { color: PAPER, wrap: "truncate-end", children: [
+        "  ",
+        pendingTool.name === "shell" ? String(pendingTool.args.cmd || "") : JSON.stringify(pendingTool.args).slice(0, 200)
+      ] }),
+      /* @__PURE__ */ jsx2(Text2, { color: STONE, children: "  (y)es once \xB7 (a)lways this session \xB7 (n)o" })
+    ] }),
     !overlay && /* @__PURE__ */ jsxs2(Box2, { borderStyle: "round", borderColor: thinking ? BRASS : STONE, paddingX: 1, marginTop: 1, children: [
       /* @__PURE__ */ jsxs2(Text2, { color: BRASS, children: [
         setup ? "key \u203A" : "\u203A",
@@ -1491,6 +1659,7 @@ function App({ version: version2 }) {
       bal != null ? ` \xB7 \u2B21 ${fmtHero(bal)} $HERO` : "",
       agentId ? ` \xB7 agent #${agentId}` : "",
       spent > 0 ? ` \xB7 session ${fmtHero(spent)}` : "",
+      toolsOn ? " \xB7 tools" : "",
       hasWallet() ? "" : " \xB7 no wallet (memory off)",
       cols >= 90 ? " \xB7 enter send \xB7 esc cancel \xB7 /help" : ""
     ] }) })
