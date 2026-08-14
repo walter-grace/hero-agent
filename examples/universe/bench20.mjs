@@ -6,13 +6,13 @@
 // so it can be launched before the top-up lands and start itself.
 //
 //   HERO_AGENT_KEY_FILE=~/.hero-agent/keys/<wallet>.key node bench20.mjs <agentId>
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { agentTurn, vaultBootKey, BASE } from "../../src/tui/api.mjs";
 import { recallLessons, lessonsBlock } from "../../src/tui/universe.mjs";
 
 const STUDENT = process.env.STUDENT_MODEL || "gemma-4-31b@cerebras";
 const agentId = process.argv[2] || "16";
-const NEED = 450_000; // ~40 attempts × ~11k avg, with headroom
+const NEED = Number(process.env.NEED || 90_000); // start when this much fuel exists
 const key = await vaultBootKey();
 
 // 6 categories, 20 tasks. Kept cheap-ish (most are 1-3 tool steps) and varied enough that the
@@ -72,7 +72,7 @@ async function attempt(lessons, q) {
       });
       break;
     } catch (e) {
-      if (/429|quota|too_many/i.test(e.message) && tries < 4) { await sleep(30_000); trace.length = 0; continue; }
+      if (/429|quota|too_many/i.test(e.message) && tries < 8) { await sleep(45_000 + tries * 15_000); trace.length = 0; continue; }
       throw e;
     }
   }
@@ -85,10 +85,18 @@ async function attempt(lessons, q) {
 const lessons = await recallLessons(agentId);
 console.log(`Curriculum: ${lessons.length} lesson(s) from agent #${agentId} · student ${STUDENT} · 20 tasks × 2 arms\n`);
 
-const results = [];
-for (let i = 0; i < TASKS.length; i++) {
+// Resume: completed tasks from a previous run are loaded, never re-paid.
+const RES_PATH = `${process.env.HOME}/.hero-agent/bench20-results.json`;
+let results = [];
+if (existsSync(RES_PATH)) {
+  try { const prev = JSON.parse(readFileSync(RES_PATH, "utf8")); if (String(prev.agentId) === String(agentId)) { results = prev.results || []; if (results.length) console.log(`RESUME: ${results.length} task(s) already done, continuing from #${results.length + 1}\n`); } } catch {}
+}
+for (let i = results.length; i < TASKS.length; i++) {
   const t = TASKS[i];
-  process.stdout.write(`[${i + 1}/20] (${t.cat}) ${t.q.slice(0, 60)}…\n`);
+  // Budget guard: stop cleanly with partial data rather than dying mid-arm.
+  const remaining = await balance().catch(() => 0);
+  if (remaining < 25_000) { console.log(`\nBUDGET STOP after ${i} task(s): ${Math.round(remaining).toLocaleString()} $HERO left. Partial verdict below; top up and re-run for the rest.`); break; }
+  process.stdout.write(`[${i + 1}/20] (${t.cat}) ${t.q.slice(0, 60)}… (⬡${Math.round(remaining / 1000)}k left)\n`);
   const A = await attempt([], t.q);
   await sleep(12_000);
   const B = await attempt(lessons, t.q);
@@ -100,7 +108,7 @@ for (let i = 0; i < TASKS.length; i++) {
 }
 
 const mean = (xs, f) => xs.reduce((s, x) => s + f(x), 0) / xs.length;
-console.log("\n═══ VERDICT (20 tasks, A blind vs B lessons) ═══");
+console.log(`\n═══ VERDICT (${results.length} task(s), A blind vs B lessons) ═══`);
 console.log(`  aggregate Δ reward: ${mean(results, (r) => r.delta).toFixed(1)} (positive = curriculum helps)`);
 for (const cat of [...new Set(TASKS.map((t) => t.cat))]) {
   const rs = results.filter((r) => r.cat === cat);
