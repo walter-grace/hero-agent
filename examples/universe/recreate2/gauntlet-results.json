@@ -1,0 +1,320 @@
+{
+  "agent": "47",
+  "when": "2026-08-14T23:33:20.321Z",
+  "results": [
+    {
+      "id": "gemma-4-31b@cerebras",
+      "label": "Gemma 4 31B",
+      "size": "31B",
+      "note": "wafer speed \u00b7 the original",
+      "secs": 4.5,
+      "cost": 137526,
+      "passed": 12,
+      "total": 12,
+      "tests": [
+        {
+          "ok": true,
+          "name": "add forward"
+        },
+        {
+          "ok": true,
+          "name": "mul forward"
+        },
+        {
+          "ok": true,
+          "name": "chain forward"
+        },
+        {
+          "ok": true,
+          "name": "mul grads"
+        },
+        {
+          "ok": true,
+          "name": "diamond graph gradient"
+        },
+        {
+          "ok": true,
+          "name": "numerical gradient check"
+        },
+        {
+          "ok": true,
+          "name": "relu blocks negative"
+        },
+        {
+          "ok": true,
+          "name": "relu passes positive"
+        },
+        {
+          "ok": true,
+          "name": "tanh grad = 1 - tanh\u00b2"
+        },
+        {
+          "ok": true,
+          "name": "reuse accumulates (+=)"
+        },
+        {
+          "ok": true,
+          "name": "XOR converges (loss < 0.05)"
+        },
+        {
+          "ok": true,
+          "name": "XOR all 4 cases correct"
+        }
+      ],
+      "crashed": false,
+      "err": "",
+      "buildError": null
+    },
+    {
+      "id": "openai/gpt-oss-20b",
+      "label": "gpt-oss-20b",
+      "size": "20B",
+      "note": "smallest OpenAI open model \u00b7 crashed mid-exam",
+      "secs": 29.4,
+      "cost": 33877,
+      "passed": 10,
+      "total": 12,
+      "tests": [
+        {
+          "ok": true,
+          "name": "add forward"
+        },
+        {
+          "ok": true,
+          "name": "mul forward"
+        },
+        {
+          "ok": true,
+          "name": "chain forward"
+        },
+        {
+          "ok": true,
+          "name": "mul grads"
+        },
+        {
+          "ok": true,
+          "name": "diamond graph gradient"
+        },
+        {
+          "ok": true,
+          "name": "numerical gradient check"
+        },
+        {
+          "ok": true,
+          "name": "relu blocks negative"
+        },
+        {
+          "ok": true,
+          "name": "relu passes positive"
+        },
+        {
+          "ok": true,
+          "name": "tanh grad = 1 - tanh\u00b2"
+        },
+        {
+          "ok": true,
+          "name": "reuse accumulates (+=)"
+        }
+      ],
+      "crashed": true,
+      "err": "file:///Users/bigneek/Desktop/hero-agent/examples/universe/recreate2/students/openai-gpt-oss-20b/herograd.mjs:56\n    return this.add(b.neg());\n                      ^\n\nTypeError: b.neg is not a functi",
+      "buildError": null
+    },
+    {
+      "id": "qwen/qwen3-32b",
+      "label": "Qwen3 32B",
+      "size": "32B",
+      "note": "Alibaba open \u00b7 crashed mid-exam",
+      "secs": 78.5,
+      "cost": 73356,
+      "passed": 10,
+      "total": 12,
+      "tests": [
+        {
+          "ok": true,
+          "name": "add forward"
+        },
+        {
+          "ok": true,
+          "name": "mul forward"
+        },
+        {
+          "ok": true,
+          "name": "chain forward"
+        },
+        {
+          "ok": true,
+          "name": "mul grads"
+        },
+        {
+          "ok": true,
+          "name": "diamond graph gradient"
+        },
+        {
+          "ok": true,
+          "name": "numerical gradient check"
+        },
+        {
+          "ok": true,
+          "name": "relu blocks negative"
+        },
+        {
+          "ok": true,
+          "name": "relu passes positive"
+        },
+        {
+          "ok": true,
+          "name": "tanh grad = 1 - tanh\u00b2"
+        },
+        {
+          "ok": true,
+          "name": "reuse accumulates (+=)"
+        }
+      ],
+      "crashed": true,
+      "err": "file:///Users/bigneek/Desktop/hero-agent/examples/universe/recreate2/exam.mjs:71\n  const preds = [[0,0],[0,1],[1,0],[1,1]].map((x) => sign(net.forward(x).data));\n                                      ",
+      "buildError": null
+    },
+    {
+      "id": "z-ai/glm-4.7@cerebras",
+      "label": "GLM-4.7",
+      "size": "355B MoE",
+      "note": "wafer speed",
+      "secs": 8.7,
+      "cost": 537014,
+      "passed": 12,
+      "total": 12,
+      "tests": [
+        {
+          "ok": true,
+          "name": "add forward"
+        },
+        {
+          "ok": true,
+          "name": "mul forward"
+        },
+        {
+          "ok": true,
+          "name": "chain forward"
+        },
+        {
+          "ok": true,
+          "name": "mul grads"
+        },
+        {
+          "ok": true,
+          "name": "diamond graph gradient"
+        },
+        {
+          "ok": true,
+          "name": "numerical gradient check"
+        },
+        {
+          "ok": true,
+          "name": "relu blocks negative"
+        },
+        {
+          "ok": true,
+          "name": "relu passes positive"
+        },
+        {
+          "ok": true,
+          "name": "tanh grad = 1 - tanh\u00b2"
+        },
+        {
+          "ok": true,
+          "name": "reuse accumulates (+=)"
+        },
+        {
+          "ok": true,
+          "name": "XOR converges (loss < 0.05)"
+        },
+        {
+          "ok": true,
+          "name": "XOR all 4 cases correct"
+        }
+      ],
+      "crashed": false,
+      "err": "",
+      "buildError": null
+    },
+    {
+      "id": "openai/gpt-oss-120b@cerebras",
+      "label": "gpt-oss-120b",
+      "size": "120B",
+      "note": "fast reference anchor",
+      "secs": 5.8,
+      "cost": 87840,
+      "passed": 12,
+      "total": 12,
+      "tests": [
+        {
+          "ok": true,
+          "name": "add forward"
+        },
+        {
+          "ok": true,
+          "name": "mul forward"
+        },
+        {
+          "ok": true,
+          "name": "chain forward"
+        },
+        {
+          "ok": true,
+          "name": "mul grads"
+        },
+        {
+          "ok": true,
+          "name": "diamond graph gradient"
+        },
+        {
+          "ok": true,
+          "name": "numerical gradient check"
+        },
+        {
+          "ok": true,
+          "name": "relu blocks negative"
+        },
+        {
+          "ok": true,
+          "name": "relu passes positive"
+        },
+        {
+          "ok": true,
+          "name": "tanh grad = 1 - tanh\u00b2"
+        },
+        {
+          "ok": true,
+          "name": "reuse accumulates (+=)"
+        },
+        {
+          "ok": true,
+          "name": "XOR converges (loss < 0.05)"
+        },
+        {
+          "ok": true,
+          "name": "XOR all 4 cases correct"
+        }
+      ],
+      "crashed": false,
+      "err": "",
+      "buildError": null
+    },
+    {
+      "id": "liquid/lfm-2.5-2.6b:free",
+      "label": "LFM 2.5",
+      "size": "2.6B",
+      "note": "the tiny floor test \u00b7 DID NOT RUN (out of fuel)",
+      "secs": 0.3,
+      "cost": 0,
+      "passed": 0,
+      "total": 12,
+      "tests": [],
+      "crashed": true,
+      "err": "Insufficient $HERO credits: 6646 left, need 110767. Top up your key.",
+      "buildError": "Insufficient $HERO credits: 6646 left, need 110767. Top up your key.",
+      "skipped": true
+    }
+  ]
+}
