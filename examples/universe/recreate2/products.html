@@ -1,0 +1,1395 @@
+<!doctype html><html><head><meta charset="utf-8"><title>The Products</title><style>
+  :root{--stone:#EDE9DE;--ink:#232823;--green:#435D56;--brass:#B4913E;--card:#F7F4EC}
+  *{box-sizing:border-box;margin:0} body{background:var(--stone);color:var(--ink);font:14px/1.5 ui-sans-serif,system-ui;padding:40px 22px}
+  .wrap{max-width:1160px;margin:0 auto} h1{font-size:28px;letter-spacing:-.02em} h1 b{color:var(--green)}
+  .sub{color:#6b7166;margin:6px 0 24px;max-width:760px}
+  h2{font-size:19px;margin:34px 0 12px;color:var(--green)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid #d8d2c2;border-radius:14px;padding:16px}
+  .head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+  .badge{font-size:11px;font-weight:700;border-radius:999px;padding:3px 10px;color:#fff;white-space:nowrap}
+  .gold{background:var(--brass)} .ok{background:#7fa893} .bad{background:#b46a4a}
+  .spark{width:100%;height:56px;background:#EFEBE0;border-radius:8px;margin-bottom:8px} .tl{font-size:9px;fill:#8a9086}
+  .truth{width:100%;border-collapse:collapse;font-size:12px} .truth th{text-align:left;color:#8a9086;font-size:10px;text-transform:uppercase}
+  .truth td{padding:2px 6px 2px 0;font-variant-numeric:tabular-nums} .truth tr.bad td{color:#b0402a}
+  .meta{color:#8a9086;font-size:11px;margin-top:8px}
+  details{margin-top:8px} summary{cursor:pointer;font-size:12px;color:var(--green)}
+  pre{background:#1d2420;color:#d9e2d7;border-radius:10px;padding:12px;font:11px/1.45 ui-monospace,monospace;overflow:auto;max-height:420px;margin-top:8px}
+  .err{background:#f3e3dc;border:1px solid #d9b7a6;border-radius:10px;padding:10px;font-size:12px}
+  .duo{display:grid;grid-template-columns:1fr 1fr;gap:14px} .duo .card{padding:8px}
+  iframe{width:100%;height:520px;border:none;border-radius:10px;background:#0f1311}
+  .cap{font-size:12px;color:#6b7166;padding:6px 8px 2px}
+</style></head><body><div class="wrap">
+  <h1>The <b>Products</b></h1>
+  <div class="sub">Not scores — the artifacts themselves. Every autograd engine below was written by its model from the on-chain blueprint, and is being RUN live on this page's build: the loss curves and XOR truth tables come from training with each student's own classes.</div>
+  <h2>HeroGrad — five engines, one blueprint</h2>
+  <div class="grid"><div class="card"><div class="head"><b>Teacher (Claude)</b><span class="badge gold">TEACHER · 12/12</span></div><div class="body"><svg viewBox="0 0 220 56" class="spark"><polyline points="0,4 5.6410256410256405,21.99746575755747 11.282051282051281,22.53327701683461 16.923076923076923,30.712363482773185 22.564102564102562,35.86194412598805 28.205128205128204,51.70457973812828 33.84615384615385,51.77698666505762 39.48717948717949,51.8233270982924 45.128205128205124,51.855186146141314 50.769230769230774,51.87546008568153 56.41025641025641,51.89283774814457 62.05128205128205,51.904422856453266 67.6923076923077,51.91600796476196 73.33333333333333,51.92469679599348 78.97435897435898,51.93048935014783 84.61538461538461,51.93628190430218 90.25641025641025,51.942074458456524 95.8974358974359,51.9449707355337 101.53846153846155,51.94786701261087 107.17948717948718,51.95365956676522 112.82051282051282,51.95365956676522 118.46153846153845,51.956555843842395 124.1025641025641,51.959452120919565 129.74358974358975,51.96234839799674 135.3846153846154,51.96524467507392 141.02564102564105,51.96524467507392 146.66666666666666,51.96814095215109 152.3076923076923,51.96814095215109 157.94871794871796,51.971037229228266 163.5897435897436,51.971037229228266 169.23076923076923,51.971037229228266 174.87179487179486,51.973933506305436 180.5128205128205,51.973933506305436 186.15384615384616,51.973933506305436 191.7948717948718,51.97682978338261 197.43589743589743,51.97682978338261 203.0769230769231,51.97682978338261 208.7179487179487,51.97972606045978 214.35897435897436,51.97972606045978 220,51.97972606045978" fill="none" stroke="#435D56" stroke-width="2"/><text x="216" y="52" text-anchor="end" class="tl">final 0.0007</text></svg><table class="truth"><tr><th>in</th><th>out</th><th>want</th></tr><tr class=""><td>0,0</td><td>-0.98</td><td>-1 ✓</td></tr><tr class=""><td>0,1</td><td>0.97</td><td>1 ✓</td></tr><tr class=""><td>1,0</td><td>0.97</td><td>1 ✓</td></tr><tr class=""><td>1,1</td><td>-0.97</td><td>-1 ✓</td></tr></table></div>
+  <div class="meta">133 lines · 4.6KB</div>
+  <details><summary>view source</summary><pre>// HeroGrad: a scalar autograd engine and a tiny MLP that learns XOR. Backpropagation from scratch.
+// Every Value carries data, grad, and a closure that knows how to push gradient to its parents.
+
+export class Value {
+  constructor(data, parents = [], op = "") {
+    this.data = data;
+    this.grad = 0;
+    this._backward = () => {};
+    this._parents = parents;
+    this._op = op;
+  }
+  static wrap(x) { return x instanceof Value ? x : new Value(x); }
+
+  add(other) {
+    other = Value.wrap(other);
+    const out = new Value(this.data + other.data, [this, other], "+");
+    out._backward = () => {
+      // d(a+b)/da = 1, /db = 1 — gradient flows through unchanged. ACCUMULATE (+=), never assign:
+      // a node used twice must receive gradient from both consumers.
+      this.grad += out.grad;
+      other.grad += out.grad;
+    };
+    return out;
+  }
+  mul(other) {
+    other = Value.wrap(other);
+    const out = new Value(this.data * other.data, [this, other], "*");
+    out._backward = () => {
+      this.grad += other.data * out.grad;  // d(ab)/da = b
+      other.grad += this.data * out.grad;  // d(ab)/db = a
+    };
+    return out;
+  }
+  pow(n) { // n is a plain number, not a Value
+    const out = new Value(this.data ** n, [this], `**${n}`);
+    out._backward = () => { this.grad += n * this.data ** (n - 1) * out.grad; };
+    return out;
+  }
+  neg() { return this.mul(-1); }
+  sub(other) { return this.add(Value.wrap(other).neg()); }
+  div(other) { return this.mul(Value.wrap(other).pow(-1)); }
+  relu() {
+    const out = new Value(Math.max(0, this.data), [this], "relu");
+    out._backward = () => { this.grad += (out.data > 0 ? 1 : 0) * out.grad; };
+    return out;
+  }
+  tanh() {
+    const t = Math.tanh(this.data);
+    const out = new Value(t, [this], "tanh");
+    out._backward = () => { this.grad += (1 - t * t) * out.grad; };
+    return out;
+  }
+  exp() {
+    const e = Math.exp(this.data);
+    const out = new Value(e, [this], "exp");
+    out._backward = () => { this.grad += e * out.grad; };
+    return out;
+  }
+
+  backward() {
+    // Reverse-mode AD needs parents processed AFTER all their consumers. Build a topological
+    // order once (DFS post-order), then walk it REVERSED from this node. Without this, a diamond
+    // graph (one node feeding two paths that rejoin) gets a partial, wrong gradient.
+    const topo = [];
+    const seen = new Set();
+    const build = (v) => {
+      if (seen.has(v)) return;
+      seen.add(v);
+      for (const p of v._parents) build(p);
+      topo.push(v);
+    };
+    build(this);
+    this.grad = 1; // dL/dL = 1 seeds the chain
+    for (let i = topo.length - 1; i >= 0; i--) topo[i]._backward();
+  }
+}
+
+// ---- the tiny net ----
+let _seed = 42;
+const rand = () => { _seed = (_seed * 1103515245 + 12345) % 2147483648; return _seed / 2147483648 * 2 - 1; }; // deterministic
+
+export class Neuron {
+  constructor(nin, activation = "tanh") {
+    this.w = Array.from({ length: nin }, () => new Value(rand()));
+    this.b = new Value(0);
+    this.activation = activation;
+  }
+  forward(xs) {
+    let act = this.b;
+    for (let i = 0; i &lt; this.w.length; i++) act = act.add(this.w[i].mul(xs[i]));
+    return this.activation === "tanh" ? act.tanh() : act.relu();
+  }
+  params() { return [...this.w, this.b]; }
+}
+export class Layer {
+  constructor(nin, nout, activation) { this.neurons = Array.from({ length: nout }, () => new Neuron(nin, activation)); }
+  forward(xs) { return this.neurons.map((n) => n.forward(xs)); }
+  params() { return this.neurons.flatMap((n) => n.params()); }
+}
+export class MLP {
+  constructor(nin, sizes) { // e.g. new MLP(2, [4, 1]) = 2 inputs, hidden 4, output 1, all tanh
+    this.layers = [];
+    let prev = nin;
+    for (const s of sizes) { this.layers.push(new Layer(prev, s, "tanh")); prev = s; }
+  }
+  forward(xs) {
+    let out = xs.map(Value.wrap);
+    for (const l of this.layers) out = l.forward(out);
+    return out.length === 1 ? out[0] : out;
+  }
+  params() { return this.layers.flatMap((l) => l.params()); }
+}
+
+// Train an MLP on XOR. Returns final mean squared loss.
+export function trainXor({ epochs = 300, lr = 0.2 } = {}) {
+  const X = [[0, 0], [0, 1], [1, 0], [1, 1]];
+  const Y = [-1, 1, 1, -1]; // tanh output range: encode XOR as ±1
+  const net = new MLP(2, [4, 1]);
+  let loss;
+  for (let e = 0; e &lt; epochs; e++) {
+    loss = new Value(0);
+    for (let i = 0; i &lt; X.length; i++) {
+      const pred = net.forward(X[i]);
+      loss = loss.add(pred.sub(Y[i]).pow(2));
+    }
+    // zero grads BEFORE backward — stale gradients from the last step otherwise accumulate forever
+    for (const p of net.params()) p.grad = 0;
+    loss.backward();
+    for (const p of net.params()) p.data -= lr * p.grad; // plain SGD
+  }
+  return { loss: loss.data / 4, net };
+}
+</pre></details></div><div class="card"><div class="head"><b>Gemma 4 31B</b><span class="badge gold">12/12 · 4.5s · ⬡137,526</span></div><div class="body"><svg viewBox="0 0 220 56" class="spark"><polyline points="0,4 5.6410256410256405,21.415430267062312 11.282051282051281,25.296735905044507 16.923076923076923,31.818991097922847 22.564102564102562,38.97922848664688 28.205128205128204,21.72700296735905 33.84615384615385,51.69436201780415 39.48717948717949,51.78635014836795 45.128205128205124,51.833827893175076 50.769230769230774,51.86350148367953 56.41025641025641,51.88427299703264 62.05128205128205,51.90207715133531 67.6923076923077,51.91394658753709 73.33333333333333,51.92284866468843 78.97435897435898,51.931750741839764 84.61538461538461,51.93768545994065 90.25641025641025,51.94362017804154 95.8974358974359,51.946587537091986 101.53846153846155,51.952522255192875 107.17948717948718,51.95548961424333 112.82051282051282,51.95845697329377 118.46153846153845,51.961424332344215 124.1025641025641,51.961424332344215 129.74358974358975,51.96439169139466 135.3846153846154,51.967359050445104 141.02564102564105,51.967359050445104 146.66666666666666,51.97032640949555 152.3076923076923,51.97032640949555 157.94871794871796,51.97329376854599 163.5897435897436,51.97329376854599 169.23076923076923,51.97626112759644 174.87179487179486,51.97626112759644 180.5128205128205,51.97626112759644 186.15384615384616,51.97922848664688 191.7948717948718,51.97922848664688 197.43589743589743,51.97922848664688 203.0769230769231,51.97922848664688 208.7179487179487,51.982195845697326 214.35897435897436,51.982195845697326 220,51.982195845697326" fill="none" stroke="#435D56" stroke-width="2"/><text x="216" y="52" text-anchor="end" class="tl">final 0.0006</text></svg><table class="truth"><tr><th>in</th><th>out</th><th>want</th></tr><tr class=""><td>0,0</td><td>-0.98</td><td>-1 ✓</td></tr><tr class=""><td>0,1</td><td>0.97</td><td>1 ✓</td></tr><tr class=""><td>1,0</td><td>0.98</td><td>1 ✓</td></tr><tr class=""><td>1,1</td><td>-0.97</td><td>-1 ✓</td></tr></table></div>
+  <div class="meta">209 lines · 4.9KB</div>
+  <details><summary>view source</summary><pre>/**
+ * HeroGrad: A scalar reverse-mode autograd engine.
+ */
+
+class Value {
+    constructor(data) {
+        this.data = data;
+        this.grad = 0;
+        this._backward = () => {};
+        this._prev = new Set();
+    }
+
+    static wrap(v) {
+        return v instanceof Value ? v : new Value(v);
+    }
+
+    add(other) {
+        other = Value.wrap(other);
+        const out = new Value(this.data + other.data);
+        out._prev.add(this);
+        out._prev.add(other);
+        out._backward = () => {
+            this.grad += out.grad;
+            other.grad += out.grad;
+        };
+        return out;
+    }
+
+    mul(other) {
+        other = Value.wrap(other);
+        const out = new Value(this.data * other.data);
+        out._prev.add(this);
+        out._prev.add(other);
+        out._backward = () => {
+            this.grad += other.data * out.grad;
+            other.grad += this.data * out.grad;
+        };
+        return out;
+    }
+
+    neg() {
+        return this.mul(-1);
+    }
+
+    sub(other) {
+        return this.add(Value.wrap(other).neg());
+    }
+
+    div(other) {
+        return this.mul(Value.wrap(other).pow(-1));
+    }
+
+    pow(exponent) {
+        // exponent must be a number
+        const out = new Value(Math.pow(this.data, exponent));
+        out._prev.add(this);
+        out._backward = () => {
+            this.grad += exponent * Math.pow(this.data, exponent - 1) * out.grad;
+        };
+        return out;
+    }
+
+    relu() {
+        const out = new Value(this.data &lt; 0 ? 0 : this.data);
+        out._prev.add(this);
+        out._backward = () => {
+            this.grad += (out.data > 0 ? 1 : 0) * out.grad;
+        };
+        return out;
+    }
+
+    tanh() {
+        const t = Math.tanh(this.data);
+        const out = new Value(t);
+        out._prev.add(this);
+        out._backward = () => {
+            this.grad += (1 - t * t) * out.grad;
+        };
+        return out;
+    }
+
+    exp() {
+        const out = new Value(Math.exp(this.data));
+        out._prev.add(this);
+        out._backward = () => {
+            this.grad += out.data * out.grad;
+        };
+        return out;
+    }
+
+    backward() {
+        const topo = [];
+        const visited = new Set();
+        const buildTopo = (v) => {
+            if (!visited.has(v)) {
+                visited.add(v);
+                v._prev.forEach(p => buildTopo(p));
+                topo.push(v);
+            }
+        };
+        buildTopo(this);
+
+        this.grad = 1;
+        for (let i = topo.length - 1; i >= 0; i--) {
+            topo[i]._backward();
+        }
+    }
+}
+
+// Deterministic random for reproducibility
+class LCG {
+    constructor(seed = 42) {
+        this.seed = seed;
+    }
+    next() {
+        this.seed = (this.seed * 1664525 + 1013904223) % 4294967296;
+        return (this.seed / 4294967296) * 2 - 1; // Range (-1, 1)
+    }
+}
+
+class Neuron {
+    constructor(nin, rng) {
+        this.w = Array.from({ length: nin }, () => new Value(rng.next()));
+        this.b = new Value(0);
+    }
+    forward(x) {
+        // x is array of Values
+        let act = this.b;
+        for (let i = 0; i &lt; this.w.length; i++) {
+            act = act.add(this.w[i].mul(x[i]));
+        }
+        return act.tanh();
+    }
+    params() {
+        return [...this.w, this.b];
+    }
+}
+
+class Layer {
+    constructor(nin,nout, rng) {
+        this.neurons = Array.from({ length: nout }, () => new Neuron(nin, rng));
+    }
+    forward(x) {
+        return this.neurons.map(n => n.forward(x));
+    }
+    params() {
+        return this.neurons.flatMap(n => n.params());
+    }
+}
+
+class MLP {
+    constructor(nin, layerSizes) {
+        const rng = new LCG();
+        this.layers = [];
+        let prevSize = nin;
+        for (const size of layerSizes) {
+            this.layers.push(new Layer(prevSize, size, rng));
+            prevSize = size;
+        }
+    }
+    forward(x) {
+        // Wrap x inputs in Value
+        let current = x.map(v => new Value(v));
+        for (const layer of this.layers) {
+            current = layer.forward(current);
+        }
+        return current.length === 1 ? current[0] : current;
+    }
+    params() {
+        return this.layers.flatMap(l => l.params());
+    }
+}
+
+function trainXor({ epochs = 400, lr = 0.2 }) {
+    const net = new MLP(2, [4, 1]);
+    const inputs = [[0, 0], [0, 1], [1, 0], [1, 1]];
+    const targets = [-1, 1, 1, -1]; // tanh targets
+    const params = net.params();
+
+    let finalLoss = 0;
+
+    for (let e = 0; e &lt; epochs; e++) {
+        // Reset gradients
+        params.forEach(p => p.grad = 0);
+
+        let totalLoss = new Value(0);
+        for (let i = 0; i &lt; 4; i++) {
+            const pred = net.forward(inputs[i]);
+            const diff = pred.sub(targets[i]);
+            totalLoss = totalLoss.add(diff.pow(2));
+        }
+
+        totalLoss.backward();
+
+        // SGD
+        params.forEach(p => {
+            p.data -= lr * p.grad;
+        });
+
+        if (e === epochs - 1) {
+            finalLoss = totalLoss.data / 4;
+        }
+    }
+
+    return { loss: finalLoss, net };
+}
+
+export { Value, MLP, trainXor };
+</pre></details></div><div class="card"><div class="head"><b>gpt-oss-20b</b><span class="badge ok">10/12 · 29.4s · ⬡33,877</span></div><div class="body"><div class="err"><b>Runtime error while training with this engine:</b><br>b.neg is not a function</div></div>
+  <div class="meta">233 lines · 5.5KB</div>
+  <details><summary>view source</summary><pre>// hero-grad autograd engine, tiny MLP for XOR
+// compatible with Node.js ES module style
+
+// deterministic linear‑congruential generator for reproducible weights
+let _lcgSeed = 123456789;
+function _lcg(){
+  _lcgSeed = (_lcgSeed * 1664525 + 1013904223) >>> 0;
+  return _lcgSeed / 0x100000000; // [0,1)
+}
+function randInRange(a,b){return a + (b-a)*_lcg();}
+
+/**
+ * Value: scalar node in an automatic differentiation graph
+ * data – number
+ * grad – gradient accumulated by backward()
+ * _prev – previous Values that contributed to this Value
+ * _backward – closure that propagates gradients to parents
+ */
+class Value{
+  constructor(data){
+    this.data = data;
+    this.grad = 0;
+    this._prev = [];
+    this._backward = ()=>{};
+  }
+
+  // Record a parent for traversal
+  _addPrev(v){ this._prev.push(v); }
+
+  /** addition */
+  add(b){
+    if(!(b instanceof Value)) b = new Value(b);
+    const out = new Value(this.data + b.data);
+    out._addPrev(this); out._addPrev(b);
+    out._backward = () => {
+      this.grad += out.grad;
+      b.grad += out.grad;
+    };
+    return out;
+  }
+
+  /** multiplication */
+  mul(b){
+    if(!(b instanceof Value)) b = new Value(b);
+    const out = new Value(this.data * b.data);
+    out._addPrev(this); out._addPrev(b);
+    out._backward = () => {
+      this.grad += b.data * out.grad;
+      b.grad += this.data * out.grad;
+    };
+    return out;
+  }
+
+  /** subtraction via add + neg */
+  sub(b){
+    return this.add(b.neg());
+  }
+
+  /** division via mul + pow(-1) */
+  div(b){
+    return this.mul(b.pow(-1));
+  }
+
+  /** negative */
+  neg(){
+    const out = new Value(-this.data);
+    out._addPrev(this);
+    out._backward = () => {
+      this.grad += -out.grad;
+    };
+    return out;
+  }
+
+  /** power, exponent is a plain number */
+  pow(exp){
+    const out = new Value(Math.pow(this.data, exp));
+    out._addPrev(this);
+    out._backward = () => {
+      this.grad += exp * Math.pow(this.data, exp-1) * out.grad;
+    };
+    return out;
+  }
+
+  /** ReLU activation */
+  relu(){
+    const outVal = this.data > 0 ? this.data : 0;
+    const out = new Value(outVal);
+    out._addPrev(this);
+    out._backward = () => {
+      if(this.data > 0) this.grad += out.grad;
+    };
+    return out;
+  }
+
+  /** tanh activation */
+  tanh(){
+    const t = Math.tanh(this.data);
+    const out = new Value(t);
+    out._addPrev(this);
+    out._backward = () => {
+      this.grad += (1 - t*t) * out.grad;
+    };
+    return out;
+  }
+
+  /** exponential */
+  exp(){
+    const e = Math.exp(this.data);
+    const out = new Value(e);
+    out._addPrev(this);
+    out._backward = () => {
+      this.grad += e * out.grad;
+    };
+    return out;
+  }
+
+  /** utility: seeding gradients before backward */
+  zeroGrad(){ this.grad = 0; }
+
+  /** Backward pass via reverse topological order */
+  backward(){
+    // Build topological order via DFS
+    const visited = new Set();
+    const topo = [];
+    function build(v){
+      if(!visited.has(v)){
+        visited.add(v);
+        for(const p of v._prev){ build(p); }
+        topo.push(v);
+      }
+    }
+    build(this);
+    // Seed gradient of loss node
+    this.grad = 1;
+    // Walk backwards: propagate gradients
+    for(let i=topo.length-1; i>=0; --i){
+      topo[i]._backward();
+    }
+  }
+}
+
+/** Neuron in an MLP layer */
+class Neuron{
+  constructor(inputSize){
+    this.w = Array.from({length:inputSize},()=>new Value(randInRange(-1,1)));
+    this.b = new Value(0);
+  }
+  forward(x){ // x is array of Value
+    let sum = new Value(0);
+    for(let i=0;i&lt;this.w.length;i++){
+      sum = sum.add(this.w[i].mul(x[i]));
+    }
+    sum = sum.add(this.b);
+    return sum.tanh();
+  }
+}
+
+/** Layer: array of Neurons */
+class Layer{
+  constructor(inputSize, numNeurons){
+    this.neurons = Array.from({length:numNeurons},()=>new Neuron(inputSize));
+  }
+  forward(x){ // x is array of Value
+    return this.neurons.map(neuron=>neuron.forward(x));
+  }
+}
+
+/** Multilayer Perceptron */
+class MLP{
+  constructor(nin, layerSizes){
+    this.layers = [];
+    let prevSize = nin;
+    for(const size of layerSizes){
+      this.layers.push(new Layer(prevSize, size));
+      prevSize = size;
+    }
+  }
+
+  forward(x){ // x: array of numbers
+    let out = x.map(v=>new Value(v));
+    for(let l=0;l&lt;this.layers.length;l++){
+      const layerOut = this.layers[l].forward(out);
+      // If last layer produces a single neuron, drop array
+      if(l===this.layers.length-1 &amp;&amp; layerOut.length===1){
+        return layerOut[0];
+      }
+      out = layerOut;
+    }
+    return out; // fall back, should not happen
+  }
+
+  /** return all parameter Values */
+  params(){
+    const ps = [];
+    for(const layer of this.layers){
+      for(const neuron of layer.neurons){
+        ps.push(...neuron.w, neuron.b);
+      }
+    }
+    return ps;
+  }
+}
+
+/** Train MLP on XOR: returns {loss, net} */
+function trainXor({epochs=400, lr=0.2}={}){
+  const inputs = [[0,0],[0,1],[1,0],[1,1]];
+  const targets = [-1,1,1,-1];
+  const net = new MLP(2, [4,1]);
+  for(let epoch=0; epoch&lt;epochs; epoch++){
+    const allParams = net.params();
+    // zero grads
+    for(const p of allParams) p.zeroGrad();
+    let loss = new Value(0);
+    for(let i=0;i&lt;inputs.length;i++){
+      const pred = net.forward(inputs[i]);
+      const diff = pred.sub(targets[i]);
+      loss = loss.add(diff.pow(2));
+    }
+    const meanLoss = loss.div(inputs.length);
+    // backward
+    meanLoss.backward();
+    // update params via SGD
+    for(const p of allParams){
+      p.data -= lr * p.grad;
+    }
+    if(epoch===epochs-1){
+      return {loss: meanLoss.data, net};
+    }
+  }
+}
+
+export { Value, MLP, trainXor };
+</pre></details></div><div class="card"><div class="head"><b>Qwen3 32B</b><span class="badge ok">10/12 · 78.5s · ⬡73,356</span></div><div class="body"><div class="err"><b>Runtime error while training with this engine:</b><br>xs[0].mul is not a function</div></div>
+  <div class="meta">240 lines · 4.7KB</div>
+  <details><summary>view source</summary><pre>class Value {
+  constructor(data) {
+    this.data = data;
+    this.grad = 0;
+    this._backward = () => {};
+    this._prev = [];
+  }
+
+  get requires_grad() {
+    return this._backward !== undefined;
+  }
+
+  add(other) {
+    other = Value.of(other);
+    const out = new Value(this.data + other.data);
+    out._prev = [this, other];
+
+    out._backward = () => {
+      this.grad += out.grad;
+      other.grad += out.grad;
+    };
+
+    return out;
+  }
+
+  mul(other) {
+    other = Value.of(other);
+    const out = new Value(this.data * other.data);
+    out._prev = [this, other];
+
+    out._backward = () => {
+      this.grad += other.data * out.grad;
+      other.grad += this.data * out.grad;
+    };
+
+    return out;
+  }
+
+  sub(other) {
+    return this.add(other.neg());
+  }
+
+  div(other) {
+    return this.mul(other.pow(-1));
+  }
+
+  neg() {
+    return this.mul(-1);
+  }
+
+  pow(n) {
+    const out = new Value(this.data ** n);
+    out._prev = [this];
+
+    out._backward = () => {
+      this.grad += n * (this.data ** (n - 1)) * out.grad;
+    };
+
+    return out;
+  }
+
+  relu() {
+    const out = new Value(this.data > 0 ? this.data : 0);
+    out._prev = [this];
+
+    out._backward = () => {
+      if (out.data > 0) this.grad += out.grad;
+    };
+
+    return out;
+  }
+
+  tanh() {
+    const t = Math.tanh(this.data);
+    const out = new Value(t);
+    out._prev = [this];
+
+    out._backward = () => {
+      this.grad += (1 - t * t) * out.grad;
+    };
+
+    return out;
+  }
+
+  exp() {
+    const out = new Value(Math.exp(this.data));
+    out._prev = [this];
+
+    out._backward = () => {
+      this.grad += out.data * out.grad;
+    };
+
+    return out;
+  }
+
+  backward() {
+    const topo = [];
+    const visited = new Set();
+
+    function build_topo(v) {
+      if (!visited.has(v)) {
+        visited.add(v);
+        for (const child of v._prev) {
+          build_topo(child);
+        }
+        topo.push(v);
+      }
+    }
+
+    build_topo(this);
+
+    this.grad = 1;
+    for (const v of topo.reverse()) {
+      v._backward();
+    }
+  }
+
+  static of(val) {
+    return val instanceof Value ? val : new Value(val);
+  }
+}
+
+class Neuron {
+  constructor(nin, seed) {
+    this.weights = Array(nin).fill().map((_, i) => {
+      const r = (seed * 1664525 + i) % 2147483647;
+      seed = r;
+      return new Value((r / 2147483647) * 2 - 1);
+    });
+    this.bias = new Value(0);
+  }
+
+  forward(xs) {
+    let act = xs[0].mul(this.weights[0]);
+    for (let i = 1; i &lt; xs.length; i++) {
+      act = act.add(xs[i].mul(this.weights[i]));
+    }
+    return act.add(this.bias).tanh();
+  }
+
+  params() {
+    return [...this.weights, this.bias];
+  }
+}
+
+class Layer {
+  constructor(nin, nout, seed) {
+    this.neurons = Array(nout).fill().map((_, i) => 
+      new Neuron(nin, seed + i)
+    );
+  }
+
+  forward(xs) {
+    const outs = this.neurons.map(n => n.forward(xs));
+    return outs.length === 1 ? outs[0] : outs;
+  }
+
+  params() {
+    return this.neurons.flatMap(n => n.params());
+  }
+}
+
+class MLP {
+  constructor(nin, layerSizes, seed = 123) {
+    this.layers = [];
+    let currentSize = nin;
+    for (const size of layerSizes) {
+      this.layers.push(new Layer(currentSize, size, seed));
+      currentSize = size;
+    }
+    this.seed = seed;
+  }
+
+  forward(xs) {
+    let out = xs;
+    for (const layer of this.layers) {
+      out = layer.forward(out);
+    }
+    return out;
+  }
+
+  params() {
+    return this.layers.flatMap(l => l.params());
+  }
+
+  clone() {
+    const clone = new MLP(this.layers[0].neurons[0].weights.length, 
+                          this.layers.map(l => l.neurons.length),
+                          this.seed);
+    for (let i = 0; i &lt; this.layers.length; i++) {
+      const srcLayer = this.layers[i];
+      const cloneLayer = clone.layers[i];
+      for (let j = 0; j &lt; srcLayer.neurons.length; j++) {
+        const srcNeuron = srcLayer.neurons[j];
+        const cloneNeuron = cloneLayer.neurons[j];
+        cloneNeuron.weights = srcNeuron.weights.map(w => 
+          new Value(w.data)
+        );
+        cloneNeuron.bias = new Value(srcNeuron.bias.data);
+      }
+    }
+    return clone;
+  }
+}
+
+async function trainXor({ epochs, lr }) {
+  const net = new MLP(2, [4, 1]);
+  const inputs = [[0,0],[0,1],[1,0],[1,1]];
+  const targets = [-1, 1, 1, -1];
+
+  for (let epoch = 0; epoch &lt; epochs; epoch++) {
+    // Zero grads
+    for (const p of net.params()) {
+      p.grad = 0;
+    }
+
+    let loss = new Value(0);
+    for (let i = 0; i &lt; inputs.length; i++) {
+      const xs = inputs[i].map(x => new Value(x));
+      const target = new Value(targets[i]);
+      const pred = net.forward(xs);
+      const err = pred.sub(target).mul(pred.sub(target));
+      loss = loss.add(err);
+    }
+
+    loss.backward();
+
+    // SGD update
+    for (const p of net.params()) {
+      p.data -= lr * p.grad;
+    }
+  }
+
+  return {
+    loss: loss.data / 4,
+    net
+  };
+}
+
+export { Value, MLP, trainXor };</pre></details></div><div class="card"><div class="head"><b>GLM-4.7</b><span class="badge gold">12/12 · 8.7s · ⬡537,014</span></div><div class="body"><svg viewBox="0 0 220 56" class="spark"><polyline points="0,4 5.6410256410256405,21.415430267062312 11.282051282051281,25.296735905044507 16.923076923076923,31.818991097922847 22.564102564102562,38.97922848664688 28.205128205128204,21.72700296735905 33.84615384615385,51.69436201780415 39.48717948717949,51.78635014836795 45.128205128205124,51.833827893175076 50.769230769230774,51.86350148367953 56.41025641025641,51.88427299703264 62.05128205128205,51.90207715133531 67.6923076923077,51.91394658753709 73.33333333333333,51.92284866468843 78.97435897435898,51.931750741839764 84.61538461538461,51.93768545994065 90.25641025641025,51.94362017804154 95.8974358974359,51.946587537091986 101.53846153846155,51.952522255192875 107.17948717948718,51.95548961424333 112.82051282051282,51.95845697329377 118.46153846153845,51.961424332344215 124.1025641025641,51.961424332344215 129.74358974358975,51.96439169139466 135.3846153846154,51.967359050445104 141.02564102564105,51.967359050445104 146.66666666666666,51.97032640949555 152.3076923076923,51.97032640949555 157.94871794871796,51.97329376854599 163.5897435897436,51.97329376854599 169.23076923076923,51.97626112759644 174.87179487179486,51.97626112759644 180.5128205128205,51.97626112759644 186.15384615384616,51.97922848664688 191.7948717948718,51.97922848664688 197.43589743589743,51.97922848664688 203.0769230769231,51.97922848664688 208.7179487179487,51.982195845697326 214.35897435897436,51.982195845697326 220,51.982195845697326" fill="none" stroke="#435D56" stroke-width="2"/><text x="216" y="52" text-anchor="end" class="tl">final 0.0006</text></svg><table class="truth"><tr><th>in</th><th>out</th><th>want</th></tr><tr class=""><td>0,0</td><td>-0.98</td><td>-1 ✓</td></tr><tr class=""><td>0,1</td><td>0.97</td><td>1 ✓</td></tr><tr class=""><td>1,0</td><td>0.98</td><td>1 ✓</td></tr><tr class=""><td>1,1</td><td>-0.97</td><td>-1 ✓</td></tr></table></div>
+  <div class="meta">295 lines · 7.1KB</div>
+  <details><summary>view source</summary><pre>// HeroGrad: Scalar reverse-mode autograd engine with XOR example
+
+// Deterministic seeded random number generator (LCG)
+class SeededRandom {
+  constructor(seed = 42) {
+    this.seed = seed;
+  }
+
+  // Returns random in range [0, 1]
+  next() {
+    this.seed = (this.seed * 1664525 + 1013904223) % 4294967296;
+    return this.seed / 4294967296;
+  }
+
+  // Returns random in range [min, max)
+  uniform(min, max) {
+    return min + this.next() * (max - min);
+  }
+}
+
+// Core Value class: wraps scalar with autograd
+export class Value {
+  constructor(data, _children = [], _op = '') {
+    this.data = data;
+    this.grad = 0;
+    this._backward = () => {}; // no-op by default
+    this._prev = _children;    // parent values that produced this
+    this._op = _op;            // for debugging/graph visualization
+  }
+
+  // Addition: a + b (handles both Value and number operands)
+  add(other) {
+    other = other instanceof Value ? other : new Value(other);
+    const out = new Value(this.data + other.data, [this, other], '+');
+
+    // Local derivative: d(a+b)/da = 1, d(a+b)/db = 1
+    out._backward = () => {
+      this.grad += out.grad;
+      other.grad += out.grad;
+    };
+
+    return out;
+  }
+
+  // Multiplication: a * b
+  mul(other) {
+    other = other instanceof Value ? other : new Value(other);
+    const out = new Value(this.data * other.data, [this, other], '*');
+
+    // Local derivative: d(a*b)/da = b, d(a*b)/db = a
+    out._backward = () => {
+      this.grad += other.data * out.grad;
+      other.grad += this.data * out.grad;
+    };
+
+    return out;
+  }
+
+  // Power: x ^ n (n must be a plain number, not a Value)
+  pow(exponent) {
+    if (typeof exponent !== 'number') {
+      throw new Error('pow() requires a plain number exponent, not a Value');
+    }
+    const out = new Value(Math.pow(this.data, exponent), [this], `^${exponent}`);
+
+    // Local derivative: d(x^n)/dx = n * x^(n-1)
+    out._backward = () => {
+      this.grad += exponent * Math.pow(this.data, exponent - 1) * out.grad;
+    };
+
+    return out;
+  }
+
+  // ReLU activation: max(0, x)
+  relu() {
+    const out = new Value(this.data > 0 ? this.data : 0, [this], 'ReLU');
+
+    // Local derivative: 1 if x > 0, else 0
+    out._backward = () => {
+      this.grad += out.data > 0 ? out.grad : 0;
+    };
+
+    return out;
+  }
+
+  // Tanh activation: tanh(x)
+  tanh() {
+    const t = Math.tanh(this.data);
+    const out = new Value(t, [this], 'tanh');
+
+    // Local derivative: d(tanh)/dx = 1 - tanh²(x)
+    // Cache the tanh value t (which is out.data) for backward
+    out._backward = () => {
+      this.grad += (1 - t * t) * out.grad;
+    };
+
+    return out;
+  }
+
+  // Exponential: e^x
+  exp() {
+    const out = new Value(Math.exp(this.data), [this], 'exp');
+
+    // Local derivative: d(e^x)/dx = e^x = out.data
+    out._backward = () => {
+      this.grad += out.data * out.grad;
+    };
+
+    return out;
+  }
+
+  // Negation: -x (derived from mul)
+  neg() {
+    return this.mul(-1);
+  }
+
+  // Subtraction: a - b (derived from add + neg)
+  sub(other) {
+    return this.add(other instanceof Value ? other.neg() : -other);
+  }
+
+  // Division: a / b (derived from mul + pow)
+  div(other) {
+    if (other instanceof Value) {
+      return this.mul(other.pow(-1));
+    } else {
+      return this.mul(Math.pow(other, -1));
+    }
+  }
+
+  // Backward pass: compute gradients via reverse topological order
+  backward() {
+    // Build topological order via DFS post-order
+    const topo = [];
+    const visited = new Set();
+
+    const buildTopo = (v) => {
+      if (visited.has(v)) return;
+      visited.add(v);
+      for (const child of v._prev) {
+        buildTopo(child);
+      }
+      topo.push(v); // post-order: children before parents
+    };
+
+    buildTopo(this);
+
+    // Seed gradient at the loss node (dL/dL = 1)
+    this.grad = 1;
+
+    // Walk backward through topo order
+    for (let i = topo.length - 1; i >= 0; i--) {
+      topo[i]._backward();
+    }
+  }
+
+  // String representation for debugging
+  toString() {
+    return `Value(data=${this.data.toFixed(4)}, grad=${this.grad.toFixed(4)})`;
+  }
+}
+
+// Neuron: nin inputs -> 1 output with weights and bias
+class Neuron {
+  constructor(nin, rng) {
+    this.w = [];
+    for (let i = 0; i &lt; nin; i++) {
+      this.w.push(new Value(rng.uniform(-1, 1)));
+    }
+    this.b = new Value(0);
+  }
+
+  // Forward pass: dot(w, x) + b passed through tanh
+  forward(x) {
+    // Dot product
+    let act = this.b; // start with bias
+    for (let i = 0; i &lt; this.w.length; i++) {
+      const xi = x[i] instanceof Value ? x[i] : new Value(x[i]);
+      act = act.add(this.w[i].mul(xi));
+    }
+    return act.tanh(); // tanh activation
+  }
+
+  // Return all parameters (weights + bias)
+  params() {
+    return [...this.w, this.b];
+  }
+}
+
+// Layer: array of neurons
+class Layer {
+  constructor(nin, nout, rng) {
+    this.neurons = [];
+    for (let i = 0; i &lt; nout; i++) {
+      this.neurons.push(new Neuron(nin, rng));
+    }
+  }
+
+  // Forward pass through all neurons
+  forward(x) {
+    const outs = [];
+    for (const neuron of this.neurons) {
+      outs.push(neuron.forward(x));
+    }
+    return outs;
+  }
+
+  // Return all parameters from all neurons
+  params() {
+    const ps = [];
+    for (const neuron of this.neurons) {
+      ps.push(...neuron.params());
+    }
+    return ps;
+  }
+}
+
+// Multi-Layer Perceptron
+export class MLP {
+  constructor(nin, layerSizes) {
+    const rng = new SeededRandom(42); // deterministic seed
+    const sz = [nin, ...layerSizes];
+    this.layers = [];
+
+    for (let i = 0; i &lt; layerSizes.length; i++) {
+      this.layers.push(new Layer(sz[i], sz[i + 1], rng));
+    }
+  }
+
+  // Forward pass through all layers
+  forward(x) {
+    let out = x;
+    for (const layer of this.layers) {
+      out = layer.forward(out);
+    }
+    // If single output, return the Value itself, not a 1-element array
+    return Array.isArray(out) &amp;&amp; out.length === 1 ? out[0] : out;
+  }
+
+  // Return all trainable parameters
+  params() {
+    const ps = [];
+    for (const layer of this.layers) {
+      ps.push(...layer.params());
+    }
+    return ps;
+  }
+}
+
+// Train MLP on XOR problem
+export function trainXor({ epochs = 300, lr = 0.2 } = {}) {
+  // XOR inputs and targets (using -1/1 for tanh activation)
+  const inputs = [[0, 0], [0, 1], [1, 0], [1, 1]];
+  const targets = [-1, 1, 1, -1];
+
+  // Create network: 2 inputs -> 4 hidden -> 1 output
+  const net = new MLP(2, [4, 1]);
+
+  // Training loop
+  for (let epoch = 0; epoch &lt; epochs; epoch++) {
+    // Forward pass: compute sum of squared errors
+    let loss = new Value(0);
+    for (let i = 0; i &lt; inputs.length; i++) {
+      const pred = net.forward(inputs[i]);
+      const target = targets[i];
+      // Square error: (pred - target)²
+      const diff = pred.sub(target);
+      loss = loss.add(diff.mul(diff));
+    }
+
+    // Zero gradients before backward
+    for (const p of net.params()) {
+      p.grad = 0;
+    }
+
+    // Backward pass
+    loss.backward();
+
+    // SGD update
+    for (const p of net.params()) {
+      p.data -= lr * p.grad;
+    }
+  }
+
+  // Compute final mean squared error
+  let totalLoss = 0;
+  for (let i = 0; i &lt; inputs.length; i++) {
+    const pred = net.forward(inputs[i]);
+    const diff = pred.data - targets[i];
+    totalLoss += diff * diff;
+  }
+  const meanLoss = totalLoss / inputs.length;
+
+  return { loss: meanLoss, net };
+}</pre></details></div><div class="card"><div class="head"><b>gpt-oss-120b</b><span class="badge gold">12/12 · 5.8s · ⬡87,840</span></div><div class="body"><svg viewBox="0 0 220 56" class="spark"><polyline points="0,4 5.6410256410256405,8.917336097434571 11.282051282051281,17.441824306815235 16.923076923076923,19.871469292562836 22.564102564102562,20.476807463073335 28.205128205128204,21.05312257061415 33.84615384615385,23.217413837781805 39.48717948717949,30.614148743197717 45.128205128205124,51.6061155739829 50.769230769230774,51.71806167400881 56.41025641025641,51.77196164809536 62.05128205128205,51.805130862917856 67.6923076923077,51.830007774034726 73.33333333333333,51.85073853329878 78.97435897435898,51.86732314071003 84.61538461538461,51.879761596268466 90.25641025641025,51.88805389997409 95.8974358974359,51.89634620367971 101.53846153846155,51.904638507385336 107.17948717948718,51.91293081109096 112.82051282051282,51.91707696294377 118.46153846153845,51.92122311479658 124.1025641025641,51.92536926664939 129.74358974358975,51.929515418502206 135.3846153846154,51.933661570355014 141.02564102564105,51.93780772220783 146.66666666666666,51.94195387406064 152.3076923076923,51.94195387406064 157.94871794871796,51.94610002591345 163.5897435897436,51.94610002591345 169.23076923076923,51.95024617776626 174.87179487179486,51.95024617776626 180.5128205128205,51.954392329619075 186.15384615384616,51.954392329619075 191.7948717948718,51.958538481471884 197.43589743589743,51.958538481471884 203.0769230769231,51.958538481471884 208.7179487179487,51.9626846333247 214.35897435897436,51.9626846333247 220,51.9626846333247" fill="none" stroke="#435D56" stroke-width="2"/><text x="216" y="52" text-anchor="end" class="tl">final 0.0009</text></svg><table class="truth"><tr><th>in</th><th>out</th><th>want</th></tr><tr class=""><td>0,0</td><td>-0.98</td><td>-1 ✓</td></tr><tr class=""><td>0,1</td><td>0.98</td><td>1 ✓</td></tr><tr class=""><td>1,0</td><td>0.97</td><td>1 ✓</td></tr><tr class=""><td>1,1</td><td>-0.97</td><td>-1 ✓</td></tr></table></div>
+  <div class="meta">247 lines · 6.5KB</div>
+  <details><summary>view source</summary><pre>// herograd.mjs – a tiny reverse‑mode autograd engine and an MLP that learns XOR
+// No external dependencies, deterministic weight init, and a minimal API as required.
+
+// ---------- deterministic random number generator ----------
+// Linear Congruential Generator – reproducible across runs.
+let _seed = 1337;
+function _rand() {
+  // Parameters from Numerical Recipes
+  _seed = (_seed * 16807) % 2147483647;
+  // Scale to (-1, 1)
+  return (_seed / 2147483647) * 2 - 1;
+}
+
+// ---------- Value – scalar node in the computational graph ----------
+class Value {
+  constructor(data) {
+    this.data = data;          // forward value (number)
+    this.grad = 0;            // accumulated gradient
+    this._prev = new Set();   // parent nodes
+    this._backward = () => {}; // function to back‑propagate local gradients
+  }
+
+  // ----- internal helper to ensure a plain number becomes a Value -----
+  static _ensure(v) {
+    return v instanceof Value ? v : new Value(v);
+  }
+
+  // ----- basic arithmetic operations returning new Value nodes -----
+  add(other) {
+    other = Value._ensure(other);
+    const out = new Value(this.data + other.data);
+    out._prev = new Set([this, other]);
+    out._backward = () => {
+      this.grad += out.grad;
+      other.grad += out.grad;
+    };
+    return out;
+  }
+
+  mul(other) {
+    other = Value._ensure(other);
+    const out = new Value(this.data * other.data);
+    out._prev = new Set([this, other]);
+    out._backward = () => {
+      this.grad += other.data * out.grad;
+      other.grad += this.data * out.grad;
+    };
+    return out;
+  }
+
+  // Negation via multiplication by -1 (uses mul's derivative)
+  neg() {
+    return this.mul(-1);
+  }
+
+  // Subtraction and division are expressed via the primitive ops
+  sub(other) {
+    return this.add(Value._ensure(other).neg());
+  }
+
+  div(other) {
+    return this.mul(Value._ensure(other).pow(-1));
+  }
+
+  // Power with a numeric exponent (exponent is a plain number)
+  pow(exp) {
+    if (typeof exp !== "number") {
+      throw new Error("Exponent must be a number");
+    }
+    const base = this.data;
+    const out = new Value(Math.pow(base, exp));
+    out._prev = new Set([this]);
+    out._backward = () => {
+      // d/dx x^n = n * x^(n-1)
+      this.grad += exp * Math.pow(base, exp - 1) * out.grad;
+    };
+    return out;
+  }
+
+  // ReLU activation
+  relu() {
+    const out = new Value(this.data > 0 ? this.data : 0);
+    out._prev = new Set([this]);
+    out._backward = () => {
+      if (out.data > 0) this.grad += out.grad;
+    };
+    return out;
+  }
+
+  // Tanh activation – cache the forward value for derivative
+  tanh() {
+    const t = Math.tanh(this.data);
+    const out = new Value(t);
+    out._prev = new Set([this]);
+    out._backward = () => {
+      // derivative: 1 - tanh^2(x)
+      this.grad += (1 - t * t) * out.grad;
+    };
+    return out;
+  }
+
+  // Exponential function
+  exp() {
+    const e = Math.exp(this.data);
+    const out = new Value(e);
+    out._prev = new Set([this]);
+    out._backward = () => {
+      this.grad += e * out.grad; // derivative of exp is exp itself
+    };
+    return out;
+  }
+
+  // ----- back‑propagation -----
+  backward() {
+    // Build a topological ordering via DFS post‑order
+    const visited = new Set();
+    const topo = [];
+    const build = (v) => {
+      if (!visited.has(v)) {
+        visited.add(v);
+        v._prev.forEach(build);
+        topo.push(v);
+      }
+    };
+    build(this);
+    // Seed gradient of the loss node
+    this.grad = 1;
+    // Reverse topological order to execute back‑propagation
+    for (let i = topo.length - 1; i >= 0; i--) {
+      topo[i]._backward();
+    }
+  }
+}
+
+// ---------- Neural network components ----------
+class Neuron {
+  constructor(nin) {
+    this.weights = [];
+    for (let i = 0; i &lt; nin; i++) {
+      this.weights.push(new Value(_rand())); // deterministic small init
+    }
+    this.bias = new Value(0);
+  }
+
+  // Forward pass: dot(w, x) + b then tanh activation
+  forward(x) {
+    // x is array of Value
+    let out = this.bias;
+    for (let i = 0; i &lt; this.weights.length; i++) {
+      out = out.add(this.weights[i].mul(x[i]));
+    }
+    return out.tanh();
+  }
+}
+
+class MLP {
+  // layerSizes is an array like [4,1] for a 2‑input network
+  constructor(nin, layerSizes) {
+    // Reset the deterministic RNG for each new network so that two nets start identically
+    _seed = 42;
+    this.layers = [];
+    let prevSize = nin;
+    for (const size of layerSizes) {
+      const layer = [];
+      for (let i = 0; i &lt; size; i++) {
+        layer.push(new Neuron(prevSize));
+      }
+      this.layers.push(layer);
+      prevSize = size;
+    }
+  }
+
+  // Input: plain numbers array – convert to Value objects internally
+  forward(arr) {
+    let cur = arr.map((v) => new Value(v));
+    for (const layer of this.layers) {
+      const next = [];
+      for (const neuron of layer) {
+        next.push(neuron.forward(cur));
+      }
+      cur = next;
+    }
+    // If the network ends with a single scalar, unwrap it for convenience
+    return cur.length === 1 ? cur[0] : cur;
+  }
+
+  // Collect all trainable parameters (weights + biases)
+  params() {
+    const ps = [];
+    for (const layer of this.layers) {
+      for (const neuron of layer) {
+        ps.push(...neuron.weights, neuron.bias);
+      }
+    }
+    return ps;
+  }
+}
+
+// ---------- Training XOR using the tiny autograd engine ----------
+function trainXor({ epochs = 300, lr = 0.2 } = {}) {
+  const net = new MLP(2, [4, 1]);
+  const inputs = [
+    [0, 0],
+    [0, 1],
+    [1, 0],
+    [1, 1],
+  ];
+  // Targets are -1 for 0, +1 for 1 (tanh range)
+  const targets = [-1, 1, 1, -1];
+
+  for (let epoch = 0; epoch &lt; epochs; epoch++) {
+    // Build loss graph for this epoch
+    let loss = new Value(0);
+    for (let i = 0; i &lt; inputs.length; i++) {
+      const pred = net.forward(inputs[i]);
+      const diff = pred.sub(targets[i]);
+      const sq = diff.mul(diff);
+      loss = loss.add(sq);
+    }
+    // Mean squared error (optional, scaling does not affect correctness)
+    loss = loss.mul(0.25);
+
+    // Zero gradients before back‑propagation
+    for (const p of net.params()) p.grad = 0;
+    // Back‑propagate
+    loss.backward();
+    // Gradient descent step
+    for (const p of net.params()) {
+      p.data -= lr * p.grad;
+    }
+  }
+
+  // Compute final loss (mean squared error)
+  let finalLoss = new Value(0);
+  for (let i = 0; i &lt; inputs.length; i++) {
+    const pred = net.forward(inputs[i]);
+    const diff = pred.sub(targets[i]);
+    const sq = diff.mul(diff);
+    finalLoss = finalLoss.add(sq);
+  }
+  finalLoss = finalLoss.mul(0.25);
+
+  return { loss: finalLoss.data, net };
+}
+
+export { Value, MLP, trainXor };
+</pre></details></div></div>
+  <h2>Habit Grid — teacher vs student (recreate #1)</h2>
+  <div class="duo">
+    <div class="card"><div class="cap"><b>Teacher (Claude)</b> — the original</div><iframe src="../recreate/teacher/habit-grid.html"></iframe></div>
+    <div class="card"><div class="cap"><b>Student (Gemma 31B)</b> — rebuilt from the trace in 4s</div><iframe src="../recreate/student/habit-grid.html"></iframe></div>
+  </div>
+</div></body></html>
