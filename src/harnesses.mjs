@@ -167,3 +167,100 @@ export async function runHarness(name, task, { model = "auto", key, brain = "her
     child.on("error", (e) => { console.error(e.message); resolve(1); });
   });
 }
+
+// ---- reasoning-trace capture + on-chain minting ----
+// The strategic point of --mint: even when the BRAIN is the harness's own account (--brain native),
+// the MEMORY is yours. Every step gets captured and checkpointed to your agent on Robinhood Chain
+// through the same memory layer everything else uses.
+
+// Claude Code: swap to stream-json and parse the event stream (assistant text, tool calls, result).
+function claudeTraceArgs(args) {
+  return [...args, "--output-format", "stream-json", "--verbose"];
+}
+function parseClaudeStream(raw) {
+  const steps = [], finals = [];
+  for (const line of raw.split("\n")) {
+    let j; try { j = JSON.parse(line); } catch { continue; }
+    if (j.type === "assistant") {
+      for (const c of j.message?.content || []) {
+        if (c.type === "text" && c.text?.trim()) finals.push(c.text.trim());
+        if (c.type === "tool_use") steps.push(`tool ${c.name}(${JSON.stringify(c.input ?? {}).slice(0, 160)})`);
+      }
+    }
+    if (j.type === "result" && j.result) { finals.length = 0; finals.push(String(j.result)); }
+  }
+  return { steps, final: finals.join("\n\n") };
+}
+
+// dsh: sessions persist as zstd-compressed JSONL; read the newest one written after launch.
+async function dshTrace(startedAt) {
+  try {
+    const { readdirSync, statSync } = await import("node:fs");
+    const { zstdDecompressSync } = await import("node:zlib");
+    const root = home(".dsh", "sessions");
+    let newest = null;
+    for (const ws of readdirSync(root)) {
+      const wsDir = join(root, ws);
+      for (const sess of readdirSync(wsDir)) {
+        const f = join(wsDir, sess, "session.jsonl.zstd");
+        try {
+          const st = statSync(f);
+          if (st.mtimeMs >= startedAt && (!newest || st.mtimeMs > newest.m)) newest = { f, m: st.mtimeMs };
+        } catch {}
+      }
+    }
+    if (!newest) return null;
+    const raw = zstdDecompressSync(readFileSync(newest.f)).toString("utf8");
+    const steps = [], finals = [];
+    for (const line of raw.split("\n")) {
+      let j; try { j = JSON.parse(line); } catch { continue; }
+      const t = JSON.stringify(j);
+      if (/tool|command|exec/i.test(j.type || "") ) steps.push(String(j.type) + " " + t.slice(0, 160));
+      const text = j.content?.find?.((c) => c.type === "text")?.text || (typeof j.content === "string" ? j.content : null);
+      if ((j.role === "assistant" || j.type === "assistant") && text) finals.push(text.trim());
+    }
+    return { steps, final: finals.slice(-1).join(""), rawLines: raw.split("\n").length };
+  } catch { return null; }
+}
+
+// Run with capture, then mint the trace to an on-chain agent. Returns the exit code.
+export async function runHarnessMinted(name, task, { model = "auto", key, brain = "hero", extraEnv = {}, agentId, privateKey } = {}) {
+  const h = HARNESSES[name];
+  if (!h) throw new Error(`Unknown harness "${name}".`);
+  if (!h.available()) throw new Error(`${h.label} isn't installed. ${h.install}`);
+  if (brain === "native" && !h.nativeCmd) throw new Error(`${h.label} has no native mode wired yet.`);
+  if (brain !== "native" && h.heroBrain === false) h.cmd();
+  const startedAt = Date.now();
+  let bin, args, envOverride;
+  if (brain === "native") { console.error(`· brain: ${h.label}'s own account`); [bin, args, envOverride] = h.nativeCmd(task, model); }
+  else { const wrote = h.ensureConfig(model); if (wrote) console.error(`✓ pointed ${h.label} at Hero Run (${wrote})`); [bin, args, envOverride] = h.cmd(task, model, key); }
+  if (name === "claude") args = claudeTraceArgs(args);
+
+  const env = { ...process.env, ...(key ? { HERO_RUN_KEY: key } : {}), ...extraEnv, ...(envOverride || {}) };
+  const { spawn } = await import("node:child_process");
+  const captured = await new Promise((resolve) => {
+    let out = "";
+    const child = spawn(bin, args, { stdio: ["inherit", "pipe", "inherit"], env });
+    child.stdout.on("data", (d) => { out += d; if (name !== "claude") process.stdout.write(d); });
+    child.on("exit", (code) => resolve({ code: code ?? 0, out }));
+    child.on("error", (e) => { console.error(e.message); resolve({ code: 1, out }); });
+  });
+
+  // Build the trace: structured where we know the format, captured output otherwise.
+  let trace;
+  if (name === "claude") { trace = parseClaudeStream(captured.out); if (trace.final) console.log(trace.final); }
+  else if (name === "dsh") trace = (await dshTrace(startedAt)) || { steps: [], final: captured.out.trim() };
+  else trace = { steps: [], final: captured.out.trim() };
+
+  // Mint: task + reasoning steps + final answer, one checkpoint, standard entry format.
+  const { OnchainMemory } = await import("./memory/onchain.mjs");
+  const memory = new OnchainMemory({ agentId, ...(privateKey ? { privateKey } : {}) });
+  const stepText = trace.steps?.length ? `steps:\n${trace.steps.map((x) => "- " + x).join("\n")}` : "steps: (none captured)";
+  await memory.append([
+    { role: "user", text: `harness task (${name}, ${brain} brain): ${task}` },
+    { role: "assistant", text: `reasoning:: harness=${name} brain=${brain} model=${brain === "native" ? "native" : model}\n${stepText}`.slice(0, 6000) },
+    { role: "assistant", text: (trace.final || "(no final output captured)").slice(0, 6000) },
+  ]);
+  console.error(`✓ minted the trace to agent #${agentId} on Robinhood Chain (${trace.steps?.length || 0} steps + final)`);
+  return captured.code;
+}

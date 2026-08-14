@@ -137,6 +137,20 @@ async function main() {
         const V = await import("../src/vault.mjs");
         if (V.vaultToken()) extraEnv = await V.secrets({ purpose: `harness ${sub} (${brain} brain)` });
       } catch {}
+      // --mint --agent <id>: capture the run's reasoning trace and checkpoint it to YOUR on-chain
+      // agent — even when the brain is the harness's own account. Their model, your memory.
+      if (argv.includes("--mint")) {
+        const agentId = flag("agent");
+        if (!agentId) { console.error("--mint needs --agent <id> (your on-chain agent)."); process.exit(1); }
+        let privateKey;
+        const kf = flag("key-file");
+        if (kf) { const { readKeyFile } = await import("../src/wallet.mjs"); privateKey = readKeyFile(kf); }
+        else if (process.env.AGENT_PRIVATE_KEY) privateKey = process.env.AGENT_PRIVATE_KEY;
+        else if (extraEnv.AGENT_PRIVATE_KEY) privateKey = extraEnv.AGENT_PRIVATE_KEY; // vault-stored
+        if (!privateKey) { console.error("--mint needs a wallet: --key-file <path>, AGENT_PRIVATE_KEY, or vault-set AGENT_PRIVATE_KEY."); process.exit(1); }
+        const { runHarnessMinted } = await import("../src/harnesses.mjs");
+        process.exit(await runHarnessMinted(sub, task, { model: flag("model", "auto"), key, brain, extraEnv, agentId, privateKey }));
+      }
       process.exit(await runHarness(sub, task, { model: flag("model", "auto"), key, brain, extraEnv }));
     }
     // Secrets from your wallet, not .env files. `vault login` derives a read-only vault token (once,

@@ -248,6 +248,24 @@ Every vault secret is injected at spawn, so an API-key account stored once in th
 any machine with a vault token. Codex is native-only for now: it speaks the OpenAI Responses API,
 which Hero Run does not serve, and the CLI says so instead of failing cryptically.
 
+### Their model, your memory: `--mint`
+
+Whichever brain runs the task, the reasoning trace can be YOURS — captured step by step and
+checkpointed to your on-chain agent:
+
+```bash
+hero-agent harness claude "fix the race condition" --brain native --mint --agent 16
+```
+
+Claude Code runs on your own subscription; the SDK captures the structured event stream (every tool
+call, every step), and mints three entries to your agent on Robinhood Chain: the task, a
+`reasoning::` step log, and the final answer. dsh traces come from its persisted session log; other
+harnesses mint their captured output. The wallet comes from `--key-file`, `AGENT_PRIVATE_KEY`, or a
+vault-stored `AGENT_PRIVATE_KEY`. Verified live: a native-brain Claude run minted a 3-step trace to
+agent #16, read back hash-chain-verified.
+
+Work in any harness, on any account. The memory accumulates in one place you own.
+
 ## Secrets from your wallet, not .env files
 
 Your agent's API keys, tokens, and connection strings can live in your Hero vault: AES-sealed under a
