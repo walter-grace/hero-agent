@@ -22,6 +22,19 @@ export function saveKey(key) {
   chmodSync(KEY_FILE, 0o600);
   return KEY_FILE;
 }
+// ---- vault (secrets from your wallet; src/vault.mjs is the engine) ----
+// Boot fallback: no env var, no key file, but a vault token on this machine → the TUI can fetch
+// HERO_RUN_KEY from the wallet vault and skip the first-run wizard entirely.
+export async function vaultBootKey() {
+  try {
+    const V = await import("../vault.mjs");
+    if (!V.vaultToken()) return null;
+    const env = await V.secrets({ purpose: "hero TUI boot" });
+    return env.HERO_RUN_KEY?.trim() || null;
+  } catch { return null; }
+}
+export async function vaultOps() { return import("../vault.mjs"); }
+
 export async function keyInfo(key) {
   const r = await fetch(`${BASE}/api/keys/info`, { headers: { "x-api-key": key } });
   if (!r.ok) throw new Error(r.status === 401 ? "That key is not valid." : `key info failed (${r.status})`);

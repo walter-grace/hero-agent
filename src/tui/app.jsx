@@ -8,6 +8,7 @@ import { BRASS, MINERAL, STEEL, STONE, EMBER, PAPER } from "./theme.mjs";
 import {
   loadKey, saveKey, keyInfo, loadSettings, saveSettings, listModels, streamChat,
   walletInfo, hasWallet, listAgents, readMemory, writeMemory, readChannel, sendChannel, BASE,
+  vaultBootKey, vaultOps,
 } from "./api.mjs";
 
 const COMMANDS = [
@@ -23,6 +24,7 @@ const COMMANDS = [
   { name: "/send", desc: "message a channel: /send 25 hello" },
   { name: "/stats", desc: "this session: turns, tokens, speed, spend" },
   { name: "/key", desc: "set a new hr_live_ inference key" },
+  { name: "/vault", desc: "wallet secrets: ls · set N=V · get N · rm N · login <token>" },
   { name: "/clear", desc: "clear the conversation" },
   { name: "/exit", desc: "leave" },
 ];
@@ -80,6 +82,21 @@ export default function App({ version }) {
     try { const info = await keyInfo(k); setBal(info.balance ?? info.remaining ?? null); } catch {}
   }, [key]);
   useEffect(() => { refreshBal(); }, [refreshBal]);
+
+  // Vault boot: no key anywhere local, but this machine has a vault token → pull HERO_RUN_KEY from
+  // the wallet vault and skip the wizard. The TUI then needs zero env vars to start.
+  useEffect(() => {
+    if (!setup) return;
+    let live = true;
+    vaultBootKey().then((k) => {
+      if (!live || !k) return;
+      setKey(k); setSetup(false);
+      sys("vault", "HERO_RUN_KEY loaded from your wallet vault. Zero local config.");
+      refreshBal(k);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, []); // once, at boot
+
 
   const sys = useCallback((title, lines, error = false) => push({ kind: "sys", title, lines: Array.isArray(lines) ? lines : [String(lines)], error }), [push]);
 
@@ -257,6 +274,36 @@ export default function App({ version }) {
           const r = await sendChannel(id, text);
           sys("sent", [`Message written to channel #${id} as ${r.mode === "room" ? "a members-only room entry 🔒" : "a public entry"}.`, `tx ${r.hash}`]);
         }).catch((e) => sys("send", String(e.message).includes("not authorized") ? "The contract rejected the write. Ask the owner to approve your wallet." : e.message, true));
+        break;
+      }
+      case "/vault": {
+        const sub = args[0];
+        const V = await vaultOps();
+        const mask = (v) => (v.length <= 8 ? "••••" : v.slice(0, 4) + "…" + v.slice(-2));
+        try {
+          if (sub === "ls" || !sub) {
+            const names = await V.listSecrets();
+            sys("vault", names.length ? names : ["(empty — /vault set NAME=value)"]);
+          } else if (sub === "set") {
+            const pairs = args.slice(1).filter((p) => p.includes("="));
+            if (!pairs.length) { sys("vault", "Usage: /vault set NAME=value [NAME2=value2]", true); break; }
+            for (const p of pairs) { const i = p.indexOf("="); await V.setSecret(p.slice(0, i), p.slice(i + 1)); }
+            sys("vault", pairs.map((p) => `✓ ${p.slice(0, p.indexOf("="))} sealed to the wallet vault`));
+          } else if (sub === "get") {
+            if (!args[1]) { sys("vault", "Usage: /vault get NAME", true); break; }
+            const env = await V.secrets({ purpose: `hero TUI /vault get ${args[1]}` });
+            if (!(args[1] in env)) { sys("vault", `${args[1]} is not in the vault.`, true); break; }
+            sys("vault", [`${args[1]} = ${env[args[1]]}`, "(shown in scrollback — /clear when done)"]);
+          } else if (sub === "rm") {
+            if (!args[1]) { sys("vault", "Usage: /vault rm NAME", true); break; }
+            await V.deleteSecret(args[1]);
+            sys("vault", `✓ removed ${args[1]}`);
+          } else if (sub === "login") {
+            if (!args[1]) { sys("vault", ["Usage: /vault login <hvt1.… token>", `Mint one at ${BASE}/locker → Environment → Connect a machine.`], true); break; }
+            const { address } = await V.vaultLogin({ token: args[1] });
+            sys("vault", [`✓ machine logged in for ${mask(address)}`, "This token decrypts your vault. It cannot sign, spend, or mint."]);
+          } else sys("vault", "Subcommands: ls · set NAME=value · get NAME · rm NAME · login <token>", true);
+        } catch (e) { sys("vault", e.message, true); }
         break;
       }
       default: sys(cmd, "Unknown command. /help lists everything.", true);
