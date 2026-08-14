@@ -132,11 +132,14 @@ export default function App({ version }) {
       if (toolsOn) {
         // Agent mode: the terminal-agent loop. Tool lines land in the transcript as they happen;
         // risky calls suspend on the approval gate until y/a/n.
-        const sysPrompt = `You are Hero, a terminal agent on the user's macOS machine. Working directory: ${process.cwd()}. You have tools: shell (run commands), read_file, write_file, web_search. LOOK instead of guessing: when asked about files, the system, or anything on this machine, use the tools. Be concise; answer in markdown; never invent command output.`;
+        const sysPrompt = `You are Hero, a terminal agent on the user's macOS machine. Working directory: ${process.cwd()}. You have tools: shell (run commands, 30s limit), read_file, write_file, web_search. LOOK instead of guessing: when asked about files, the system, or anything on this machine, use the tools. Shell discipline: append 2>/dev/null to noisy commands; for disk usage prefer `du -xh -d 2` and targeted `find <dir> -size +200M`; NEVER scan / or the whole home tree file-by-file; no sudo. Be concise; answer in markdown; never invent command output.`;
         const out = await agentTurn({
           key, model, cwd: process.cwd(), signal: ctrl.signal,
           messages: [{ role: "system", content: sysPrompt }, ...convo.current.slice(-24)],
-          onTool: (name, args) => push({ kind: "sys", title: null, lines: [`· ${name}(${JSON.stringify(args).slice(0, 90)})`], error: false }),
+          onTool: (name, args) => {
+            push({ kind: "sys", title: null, lines: [`· ${name}(${JSON.stringify(args).slice(0, 90)})`], error: false });
+            setThinking({ startedAt: Date.now(), note: name }); // live elapsed while the tool runs
+          },
           approve: (name, args) => new Promise((resolveA) => {
             if (autoRef.current || alwaysRef.current.has(name)) return resolveA(true);
             setPendingTool({ name, args, resolve: resolveA });

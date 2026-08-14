@@ -262,7 +262,11 @@ import { readFile as _readFile, writeFile as _writeFile } from "node:fs/promises
 import { resolve as _resolvePath } from "node:path";
 
 const sh = (cmd, cwd) => new Promise((res) => {
-  _exec(cmd, { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+  // sudo has no TTY here and whole-disk scans always time out: refuse both with a TEACHING message,
+  // because a bare failure makes the model retry the same class of command until the turn feels dead.
+  if (/\bsudo\b/.test(cmd)) return res("REFUSED: sudo is unavailable (no TTY for a password). Re-run without sudo against paths the user owns.");
+  _exec(cmd, { cwd, timeout: 30_000, maxBuffer: 1024 * 1024, killSignal: "SIGKILL" }, (err, stdout, stderr) => {
+    if (err?.killed) return res("TIMED OUT after 30s: that command is too heavy. Use targeted scans instead, e.g. `du -xh -d 2 ~ 2>/dev/null | sort -hr | head` for directories or `find ~/Desktop ~/Downloads -type f -size +200M -exec du -h {} + 2>/dev/null | sort -hr | head` for files. Never scan / or run du per-file across the whole home directory.");
     res(`exit ${err?.code ?? 0}\n--- stdout ---\n${String(stdout).slice(0, 4000)}\n--- stderr ---\n${String(stderr).slice(0, 2000)}`);
   });
 });
