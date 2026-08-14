@@ -327,9 +327,20 @@ export async function agentTurn({ key, model, messages, cwd, onTool, approve, si
   };
   for (let hop = 0; hop <= maxSteps; hop++) {
     const last = hop === maxSteps;
-    const r = await call({ model, messages: msgs, max_tokens: 1600, ...(last ? {} : { tools: defs }) });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error?.message || `request failed (${r.status})`);
+    let r, d;
+    for (let tries = 0; ; tries++) {
+      r = await call({ model, messages: msgs, max_tokens: 1600, ...(last ? {} : { tools: defs }) });
+      d = await r.json();
+      if (r.ok) break;
+      // Rate limits retry THIS request in place: prior hops stay paid-for exactly once. (The old
+      // throw made outer harnesses re-run the whole turn, re-billing every completed step.)
+      if (r.status === 429 || /quota|too_many/i.test(d.error?.message || "")) {
+        if (tries >= 6) throw new Error(d.error?.message || "rate limited (7 attempts)");
+        await new Promise((res) => setTimeout(res, 30_000 + tries * 15_000));
+        continue;
+      }
+      throw new Error(d.error?.message || `request failed (${r.status})`);
+    }
     const msg = d.choices?.[0]?.message || {};
     cost += Number(msg.x_hero?.charged_hero || d.x_hero?.charged_hero || 0);
     if (!msg.tool_calls?.length) return { text: (msg.content || "").trim(), costHero: cost, steps, model: msg.x_hero?.resolved_model || d.x_hero?.resolved_model };
