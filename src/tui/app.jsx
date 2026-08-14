@@ -10,6 +10,7 @@ import {
   walletInfo, hasWallet, listAgents, readMemory, writeMemory, readChannel, sendChannel, BASE,
   vaultBootKey, vaultOps, agentTurn, cerebrasModels,
 } from "./api.mjs";
+import { universeReview, mintLesson, recallLessons, lessonsBlock } from "./universe.mjs";
 
 const COMMANDS = [
   { name: "/help", desc: "commands and keys" },
@@ -28,6 +29,7 @@ const COMMANDS = [
   { name: "/tools", desc: "toggle agent mode (shell, files, web search with y/n approval)" },
   { name: "/auto", desc: "auto-approve every tool, no prompts (this session)" },
   { name: "/turbo", desc: "pick any Cerebras-served model at wafer speed" },
+  { name: "/learn", desc: "Universe reviews the last turn, mints a lesson:: to your agent (auto = every turn)" },
   { name: "/clear", desc: "clear the conversation" },
   { name: "/exit", desc: "leave" },
 ];
@@ -78,6 +80,9 @@ export default function App({ version }) {
   const alwaysRef = useRef(new Set());                // tool names auto-approved this session
   const autoRef = useRef(false);                      // /auto: approve every tool, no prompts
   const preTurboRef = useRef(null);                   // model to restore when /turbo toggles off
+  const lastTurnRef = useRef(null);                   // { task, trace, answer } of the last agent turn
+  const lessonsRef = useRef({ list: [], loadedFor: null }); // earned lessons cache per agent
+  const learnAutoRef = useRef(false);                 // /learn auto: Universe reviews every turn
 
   const slashOpen = !setup && !overlay && input.startsWith("/") && !input.includes(" ");
   const slashItems = slashOpen ? COMMANDS.filter((c) => c.name.startsWith(input.trim())) : [];
@@ -132,11 +137,20 @@ export default function App({ version }) {
       if (toolsOn) {
         // Agent mode: the terminal-agent loop. Tool lines land in the transcript as they happen;
         // risky calls suspend on the approval gate until y/a/n.
-        const sysPrompt = `You are Hero, a terminal agent on the user's macOS machine. Working directory: ${process.cwd()}. You have tools: shell (run commands, 30s limit), read_file, write_file, web_search. LOOK instead of guessing: when asked about files, the system, or anything on this machine, use the tools. Shell discipline: append 2>/dev/null to noisy commands; for disk usage prefer `du -xh -d 2` and targeted `find <dir> -size +200M`; NEVER scan / or the whole home tree file-by-file; no sudo. Be concise; answer in markdown; never invent command output.`;
+        // Earned lessons ride the system prompt: the student starts every session with everything
+        // the Universe has ever taught this agent. Loaded once per agent, refreshed on new mints.
+        if (agentId && lessonsRef.current.loadedFor !== agentId) {
+          lessonsRef.current = { list: await recallLessons(agentId).catch(() => []), loadedFor: agentId };
+          if (lessonsRef.current.list.length) sys("universe", `${lessonsRef.current.list.length} earned lesson(s) loaded from agent #${agentId}.`);
+        }
+        const turnTrace = [];
+        lastTurnRef.current = { task: prompt, trace: turnTrace, answer: "" };
+        const sysPrompt = lessonsBlock(lessonsRef.current.list) + `\n\nYou are Hero, a terminal agent on the user's macOS machine. Working directory: ${process.cwd()}. You have tools: shell (run commands, 30s limit), read_file, write_file, web_search. LOOK instead of guessing: when asked about files, the system, or anything on this machine, use the tools. Shell discipline: append 2>/dev/null to noisy commands; for disk usage prefer du -xh -d 2 and targeted find with -size +200M; NEVER scan / or the whole home tree file-by-file; no sudo. Be concise; answer in markdown; never invent command output.`;
         const out = await agentTurn({
           key, model, cwd: process.cwd(), signal: ctrl.signal,
           messages: [{ role: "system", content: sysPrompt }, ...convo.current.slice(-24)],
           onTool: (name, args) => {
+            turnTrace.push({ name, args });
             push({ kind: "sys", title: null, lines: [`· ${name}(${JSON.stringify(args).slice(0, 90)})`], error: false });
             setThinking({ startedAt: Date.now(), note: name }); // live elapsed while the tool runs
           },
@@ -154,6 +168,16 @@ export default function App({ version }) {
           meta: { model: out.model || model, cost: out.costHero ? `${fmtHero(out.costHero)} $HERO` : "", secs: secs.toFixed(1), tps: null },
         });
         if (out.costHero) { setSpent((s) => s + out.costHero); setBal((b) => (b == null ? b : Math.max(0, b - out.costHero))); }
+        lastTurnRef.current.answer = out.text;
+        if (learnAutoRef.current && agentId) {
+          universeReview({ key, task: prompt, trace: turnTrace, answer: out.text }).then(async ({ lesson, cost }) => {
+            if (cost) { setSpent((s) => s + cost); setBal((b) => (b == null ? b : Math.max(0, b - cost))); }
+            if (!lesson) return;
+            const hash = await mintLesson(agentId, lesson);
+            lessonsRef.current.list.push(lesson);
+            sys("universe", [`Lesson minted to agent #${agentId}:`, `  ${lesson}`, `tx ${hash.slice(0, 14)}…`]);
+          }).catch(() => {});
+        }
         return;
       }
       let first = true;
@@ -190,7 +214,7 @@ export default function App({ version }) {
     } finally {
       setThinking(null); setLive(null); abortRef.current = null;
     }
-  }, [key, model, toolsOn, push, sys]);
+  }, [key, model, toolsOn, agentId, push, sys]);
 
   // ---- commands ----
   const runCommand = useCallback(async (raw) => {
@@ -327,6 +351,25 @@ export default function App({ version }) {
           const r = await sendChannel(id, text);
           sys("sent", [`Message written to channel #${id} as ${r.mode === "room" ? "a members-only room entry 🔒" : "a public entry"}.`, `tx ${r.hash}`]);
         }).catch((e) => sys("send", String(e.message).includes("not authorized") ? "The contract rejected the write. Ask the owner to approve your wallet." : e.message, true));
+        break;
+      }
+      case "/learn": {
+        if (rest[0] === "auto") {
+          learnAutoRef.current = !learnAutoRef.current;
+          sys("universe", learnAutoRef.current ? "Auto-learning ON: the Universe reviews every agent turn and mints what it teaches." : "Auto-learning off.");
+          break;
+        }
+        const lt = lastTurnRef.current;
+        if (!lt) { sys("universe", "Nothing to learn from yet — run an agent-mode turn first.", true); break; }
+        if (!agentId) { sys("universe", "Pick a memory agent first: /agents then /agent <id>.", true); break; }
+        await withSpin("The Universe reviews the attempt", async () => {
+          const { lesson, cost } = await universeReview({ key, task: lt.task, trace: lt.trace, answer: lt.answer });
+          if (!lesson) { sys("universe", "No durable lesson in that turn. The Hero did fine."); return; }
+          const hash = await mintLesson(agentId, lesson);
+          lessonsRef.current.list.push(lesson);
+          if (cost) { setSpent((s) => s + cost); setBal((b) => (b == null ? b : Math.max(0, b - cost))); }
+          sys("universe", [`Lesson minted to agent #${agentId}:`, `  ${lesson}`, `tx ${hash.slice(0, 14)}… · the Hero starts every future session knowing this.`]);
+        }).catch((e) => sys("universe", e.message, true));
         break;
       }
       case "/auto": {
