@@ -1176,6 +1176,10 @@ function App({ version: version2 }) {
     refreshBal();
   }, [refreshBal]);
   useEffect2(() => {
+    process.stdout.write("\x1B[?2004h");
+    return () => process.stdout.write("\x1B[?2004l");
+  }, []);
+  useEffect2(() => {
     let live2 = true;
     (async () => {
       try {
@@ -1419,7 +1423,7 @@ You are Hero, a terminal agent on the user's macOS machine. Working directory: $
         }).catch((e) => sys("agents", e.message, true));
         break;
       case "/agent": {
-        const id = Number(arg);
+        const id = Number(String(arg).replace(/[^0-9]/g, ""));
         if (!Number.isFinite(id) || id < 1) {
           sys("agent", "Usage: /agent <id>", true);
           break;
@@ -1630,7 +1634,32 @@ You are Hero, a terminal agent on the user's macOS machine. Working directory: $
         sys(cmd, "Unknown command. /help lists everything.", true);
     }
   }, [key, model, agentId, spent, exit, sys, push]);
+  const pasteRef = useRef(null);
   useInput((ch, k) => {
+    {
+      let chunk = ch || "";
+      if (pasteRef.current !== null || chunk.includes("[200~")) {
+        if (pasteRef.current === null) {
+          pasteRef.current = "";
+          chunk = chunk.split("[200~").slice(1).join("[200~");
+        }
+        let done = false;
+        const end = chunk.indexOf("[201~");
+        if (end >= 0) {
+          pasteRef.current += chunk.slice(0, end).replace(/\x1b$/, "");
+          done = true;
+        } else pasteRef.current += chunk;
+        if (done) {
+          const text = pasteRef.current.replace(/\x1b\[?20[01]~?/g, "").replace(/[\r\n]+/g, " ").replace(/[\x00-\x1f]/g, "").trim();
+          pasteRef.current = null;
+          if (text) {
+            setInput((v) => v.slice(0, cursor) + text + v.slice(cursor));
+            setCursor((c) => c + text.length);
+          }
+        }
+        return;
+      }
+    }
     if (pendingTool) {
       const c = (ch || "").toLowerCase();
       if (c === "y" || k.return) {

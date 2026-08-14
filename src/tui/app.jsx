@@ -96,6 +96,15 @@ export default function App({ version }) {
   }, [key]);
   useEffect(() => { refreshBal(); }, [refreshBal]);
 
+  // Bracketed paste: the terminal wraps pasted text in ESC[200~ … ESC[201~, so a multi-word or
+  // multi-line paste becomes ONE literal insert instead of a burst of keystrokes where the first
+  // \r submits half a command ("/agent" … then "16" goes to the model as chat).
+  useEffect(() => {
+    process.stdout.write("\x1b[?2004h");
+    return () => process.stdout.write("\x1b[?2004l");
+  }, []);
+
+
   // Balance-aware key boot. The naive chain (env → key file → vault) once picked a drained key
   // file (44 $HERO) over a funded vault key and greeted the user with an inference error. Now: if
   // the local key is missing OR nearly empty, check the vault and take whichever key can actually
@@ -297,7 +306,7 @@ export default function App({ version }) {
         }).catch((e) => sys("agents", e.message, true));
         break;
       case "/agent": {
-        const id = Number(arg);
+        const id = Number(String(arg).replace(/[^0-9]/g, ""));
         if (!Number.isFinite(id) || id < 1) { sys("agent", "Usage: /agent <id>", true); break; }
         setAgentId(id); saveSettings({ agentId: id });
         sys("agent", `Working agent is now #${id}. /recall reads it, /remember writes to it.`);
@@ -450,7 +459,26 @@ export default function App({ version }) {
   }, [key, model, agentId, spent, exit, sys, push]);
 
   // ---- input handling ----
+  const pasteRef = useRef(null); // accumulating a bracketed paste when non-null
   useInput((ch, k) => {
+    // Bracketed-paste frames take priority: buffer everything between the markers, then insert the
+    // whole paste as literal text (newlines collapse to spaces; the user presses enter to send).
+    {
+      let chunk = ch || "";
+      if (pasteRef.current !== null || chunk.includes("[200~")) {
+        if (pasteRef.current === null) { pasteRef.current = ""; chunk = chunk.split("[200~").slice(1).join("[200~"); }
+        let done = false;
+        const end = chunk.indexOf("[201~");
+        if (end >= 0) { pasteRef.current += chunk.slice(0, end).replace(/\x1b$/, ""); done = true; }
+        else pasteRef.current += chunk;
+        if (done) {
+          const text = pasteRef.current.replace(/\x1b\[?20[01]~?/g, "").replace(/[\r\n]+/g, " ").replace(/[\x00-\x1f]/g, "").trim();
+          pasteRef.current = null;
+          if (text) { setInput((v) => v.slice(0, cursor) + text + v.slice(cursor)); setCursor((c) => c + text.length); }
+        }
+        return;
+      }
+    }
     // approval gate owns the keyboard while a tool waits: y = once, a = always this session, n/esc = no
     if (pendingTool) {
       const c = (ch || "").toLowerCase();
