@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ArchUI React Component Library</title>
+  <style>
+    :root {
+      --bg: #D8E4FD;
+      --surface: #B9CBF0;
+      --border: #909AB5;
+      --accent: #738DC2;
+      --text: #0A1A60;
+      --ink: #0A1A60;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+    header {
+      padding: 32px 0;
+      border-bottom: 1px solid rgba(var(--border), 0.1);
+    }
+    nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .hero {
+      padding: 64px 0;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: 39px;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .btn {
+      padding: 12px 24px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-weight: 500;
+      transition: 0.2s ease;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+      margin-right: 16px;
+    }
+    .btn-primary:hover {
+      background: #5f73c2;
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 2px solid var(--accent);
+      color: var(--accent);
+    }
+    .btn-ghost:hover {
+      background: rgba(var(--accent), 0.1);
+    }
+    .specimen-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 48px;
+      padding: 64px 0;
+    }
+    .card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 24px;
+      min-height: 240px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      box-shadow: 0 10px 30px rgba(var(--ink), 0.08);
+    }
+    .card h3 {
+      margin-top: 16px;
+      font-size: 16px;
+      color: rgba(var(--text), 0.6);
+    }
+    input {
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin: 8px 0;
+    }
+    .toggle {
+      position: relative;
+      width: 50px;
+      height: 24px;
+      background: #ddd;
+      border-radius: 12px;
+      cursor: pointer;
+      margin: 16px 0;
+    }
+    .toggle::after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      background: white;
+      border-radius: 50%;
+      top: 4px;
+      left: 4px;
+      transition: 0.2s ease;
+    }
+    .toggle.active {
+      background: var(--accent);
+    }
+    .toggle.active::after {
+      left: 30px;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .tab {
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      background: #f0f0f0;
+    }
+    .tab.active {
+      background: var(--accent);
+      color: white;
+    }
+    .tooltip {
+      position: relative;
+      display: inline-block;
+      cursor: help;
+    }
+    .tooltip-text {
+      visibility: hidden;
+      background: var(--accent);
+      color: white;
+      padding: 6px 12px;
+      border-radius: 4px;
+      position: absolute;
+      bottom: 120%;
+      left: 50%;
+      transform: translateX(-50%);
+      opacity: 0;
+      transition: 0.2s ease;
+    }
+    .tooltip:hover .tooltip-text {
+      visibility: visible;
+      opacity: 1;
+    }
+    footer {
+      text-align: center;
+      padding: 32px;
+      color: rgba(var(--text), 0.3);
+      font-size: 14px;
+      border-top: 1px solid rgba(var(--border), 0.05);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <nav>
+        <div class="wordmark">ArchUI</div>
+        <div>
+          <button class="btn btn-ghost">Docs</button>
+          <button class="btn btn-ghost">Guides</button>
+          <button class="btn btn-ghost">Changelog</button>
+        </div>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <h1>ArchUI React Component Library</h1>
+      <p>Architectural precision meets modern UI development</p>
+      <div>
+        <button class="btn btn-primary">Get Started</button>
+        <button class="btn btn-ghost">View Storybook</button>
+      </div>
+    </section>
+
+    <section class="specimen-grid">
+
+      <!-- Button Specimen -->
+      <div class="card">
+        <button class="btn btn-primary">Primary</button>
+        <button class="btn btn-ghost">Ghost</button>
+        <button class="btn btn-primary disabled">Disabled</button>
+        <h3>Buttons · States &amp; Themes</h3>
+      </div>
+
+      <!-- Input Specimen -->
+      <div class="card">
+        <input type="text" placeholder="Default input"/>
+        <input type="text" placeholder="Focused" autofocus/>
+        <input type="text" disabled placeholder="Disabled"/>
+        <h3>Inputs · Focus &amp; States</h3>
+      </div>
+
+      <!-- Toggle Specimen -->
+      <div class="card" id="toggle-card">
+        <div class="toggle" onclick="this.classList.toggle('active')"></div>
+        <h3>Toggle · Click to Switch</h3>
+      </div>
+
+      <!-- Progress Specimen -->
+      <div class="card">
+        <div style="width: 100%; background: #eee; border-radius: 8px; overflow: hidden;">
+          <div style="width: 60%; height: 12px; background: var(--accent);"></div>
+        </div>
+        <h3>Progress · 60% Complete</h3>
+      </div>
+
+      <!-- Card Layout -->
+      <div class="card">
+        <h2>Card Title</h2>
+        <p>Shadow depth: 0 10px 30px rgba(10, 26, 96, 0.08)</p>
+        <h3>Card · Elevation &amp; Padding</h3>
+      </div>
+
+      <!-- Alert Specimen -->
+      <div class="card">
+        <div style="background: rgba(var(--accent), 0.1); padding: 12px; border-radius: 6px;">
+          <p style="color: var(--accent);">Success: Action completed</p>
+        </div>
+        <h3>Alert · Colored Background</h3>
+      </div>
+
+      <!-- Tabs Specimen -->
+      <div class="card">
+        <div class="tabs">
+          <div class="tab active" onclick="switchTab(0)">Tab 1</div>
+          <div class="tab" onclick="switchTab(1)">Tab 2</div>
+        </div>
+        <div id="tab-content">
+          <p style="display: block;" id="tab1">Content for Tab 1</p>
+          <p style="display: none;" id="tab2">Content for Tab 2</p>
+        </div>
+        <h3>Tabs · Click to Switch</h3>
+      </div>
+
+      <!-- Tooltip Specimen -->
+      <div class="card">
+        <div class="tooltip">
+          Hover me
+          <div class="tooltip-text">This is a tooltip</div>
+        </div>
+        <h3>Tooltip · Hover to See</h3>
+      </div>
+
+      <!-- Table Specimen -->
+      <div class="card">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <th style="border: 1px solid var(--border); padding: 8px;">Header 1</th>
+            <th style="border: 1px solid var(--border); padding: 8px;">Header 2</th>
+          </tr>
+          <tr>
+            <td style="border: 1px solid var(--border); padding: 8px;">Cell 1</td>
+            <td style="border: 1px solid var(--border); padding: 8px;">Cell 2</td>
+          </tr>
+        </table>
+        <h3>Table · Basic Structure</h3>
+      </div>
+    </section>
+
+    <footer>
+      <p>ArchUI · Built from a design brief</p>
+    </footer>
+  </div>
+
+  <script>
+    function switchTab(index) {
+      document.querySelectorAll('.tab').forEach((el, i) => {
+        el.classList.toggle('active', i === index);
+      });
+      document.querySelectorAll('#tab-content p').forEach((el, i) => {
+        el.style.display = i === index ? 'block' : 'none';
+      });
+    }
+
+    // Focus ring test
+    document.querySelectorAll('button, input').forEach(el => {
+      el.addEventListener('focus', e => {
+        e.target.style.outline = '2px solid rgba(115, 141, 194, 0.4)';
+      });
+      el.addEventListener('blur', e => {
+        e.target.style.outline = '';
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ArchUI React Component Library</title>
+<style>
+  /* ---------- Palette ---------- */
+  :root {
+    --bg: #D8E4FD;          /* lightest – page background */
+    --surface: #B9CBF0;     /* next – cards, sections */
+    --muted: #909AB5;       /* mid‑tone – borders, muted text */
+    --primary: #4961A5;    /* second‑darkest – primary actions */
+    --ink: #0A1A60;        /* darkest – headings, body copy */
+    --shadow: rgba(10,26,96,0.08);
+    --focus: rgba(73,97,165,0.4);
+  }
+
+  /* ---------- Global ---------- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { font-size: 100%; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+    font-size: 16px; /* body */
+  }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1, h2, h3, h4, h5, h6 {
+    margin: 0;
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  h1 { font-size: 39px; margin-bottom: 24px; }
+  h2 { font-size: 31px; margin-bottom: 20px; }
+  h3 { font-size: 25px; margin-bottom: 16px; }
+  p { margin: 0 0 16px; }
+
+  /* ---------- Layout ---------- */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  .nav { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; }
+  .nav .logo { font-size: 25px; font-weight: 700; color: var(--ink); }
+  .nav ul { list-style: none; display: flex; gap: 24px; margin: 0; padding: 0; }
+  .nav a { font-size: 16px; }
+  .nav .cta { padding: 8px 20px; background: var(--primary); color: #fff; border-radius: 8px; border: none; cursor: pointer; }
+  .nav .cta:hover { background: #31508a; }
+
+  /* ---------- Hero ---------- */
+  .hero { text-align: center; padding: 64px 0; }
+  .hero h1 { color: var(--ink); }
+  .hero p { color: var(--muted); max-width: 600px; margin: 0 auto 32px; }
+  .hero .buttons { display: flex; gap: 16px; justify-content: center; }
+  .btn { font-size: 16px; padding: 10px 24px; border: none; border-radius: 8px; cursor: pointer; transition: background .2s; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: #31508a; }
+  .btn-ghost { background: transparent; color: var(--primary); border: 2px solid var(--primary); }
+  .btn-ghost:hover { background: rgba(73,97,165,0.08); }
+
+  /* ---------- Specimen Grid ---------- */
+  .grid { display: grid; gap: 32px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .card {
+    background: var(--surface);
+    border: 1px solid rgba(144,154,181,0.2);
+    border-radius: 12px;
+    padding: 24px;
+    min-height: 200px;
+    box-shadow: 0 10px 30px var(--shadow);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+  }
+  .card-caption {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* ---------- Components ---------- */
+  /* Button component (demo inside card) */
+  .demo-btn { padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer; background: var(--primary); color: #fff; }
+  .demo-btn:hover { background: #31508a; }
+
+  /* Input component */
+  .demo-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--muted);
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .demo-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--focus); }
+
+  /* Toggle switch */
+  .toggle {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--muted);
+    transition: .4s;
+    border-radius: 24px;
+  }
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 20px; width: 20px;
+    left: 2px; bottom: 2px;
+    background: #fff;
+    transition: .4s;
+    border-radius: 50%;
+  }
+  input:checked + .slider { background: var(--primary); }
+  input:focus-visible + .slider { box-shadow: 0 0 0 3px var(--focus); }
+  input:checked + .slider:before { transform: translateX(20px); }
+
+  /* Progress bar */
+  .progress {
+    width: 100%;
+    height: 12px;
+    background: rgba(73,97,165,0.1);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .progress-inner {
+    height: 100%;
+    background: var(--primary);
+    width: 65%;
+  }
+
+  /* Alert */
+  .alert {
+    padding: 12px 16px;
+    background: rgba(255,221,0,0.2);
+    border-left: 4px solid #ffdd00;
+    border-radius: 8px;
+    position: relative;
+    width: 100%;
+    text-align: left;
+    font-size: 14px;
+  }
+  .alert button {
+    position: absolute;
+    top: 8px; right: 8px;
+    background: transparent;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    color: var(--ink);
+  }
+
+  /* Tabs */
+  .tabs {
+    width: 100%;
+  }
+  .tab-buttons { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tab-buttons button {
+    flex: 1;
+    padding: 6px 0;
+    background: var(--muted);
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    border-radius: 6px;
+    color: #fff;
+  }
+  .tab-buttons button.active { background: var(--primary); }
+  .tab-content { padding: 8px; background: #fff; border-radius: 6px; font-size: 13px; }
+
+  /* Tooltip */
+  .tooltip {
+    position: relative;
+    cursor: help;
+    border-bottom: 1px dotted var(--muted);
+  }
+  .tooltip::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: 50%;
+    bottom: 125%;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    font-size: 12px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s;
+  }
+  .tooltip:hover::after { opacity: 1; }
+
+  /* ---------- Footer ---------- */
+  footer { padding: 24px 0; text-align: center; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <header class="container">
+    <nav class="nav">
+      <div class="logo">ArchUI</div>
+      <ul>
+        <li><a href="#">Components</a></li>
+        <li><a href="#">Docs</a></li>
+        <li><a href="#">GitHub</a></li>
+      </ul>
+      <button class="cta">Get Started</button>
+    </nav>
+  </header>
+
+  <section class="hero container">
+    <h1>ArchUI React Component Library</h1>
+    <p>Blueprint your UI with reusable React components.</p>
+    <div class="buttons">
+      <button class="btn btn-primary">Explore</button>
+      <button class="btn btn-ghost">GitHub</button>
+    </div>
+  </section>
+
+  <section class="container" style="padding: 64px 0;">
+    <h2 style="margin-bottom:32px;">Live Specimens</h2>
+    <div class="grid">
+      <!-- Button specimen -->
+      <div class="card">
+        <button class="demo-btn">Primary</button>
+        <div class="card-caption">Button – default state</div>
+      </div>
+      <!-- Input specimen -->
+      <div class="card">
+        <input class="demo-input" type="text" placeholder="Enter text" />
+        <div class="card-caption">Input – focus ring</div>
+      </div>
+      <!-- Toggle specimen -->
+      <div class="card">
+        <label class="toggle">
+          <input type="checkbox" id="demoToggle" />
+          <span class="slider"></span>
+        </label>
+        <div class="card-caption" id="toggleCaption">Toggle – off</div>
+      </div>
+      <!-- Progress bar specimen -->
+      <div class="card">
+        <div class="progress"><div class="progress-inner"></div></div>
+        <div class="card-caption">Progress – 65%</div>
+      </div>
+      <!-- Alert specimen -->
+      <div class="card" style="max-width:260px;">
+        <div class="alert" id="demoAlert">
+          <span>⚠️  Stay tuned for updates!</span>
+          <button aria-label="Close alert" onclick="this.parentElement.style.display='none'">✕</button>
+        </div>
+        <div class="card-caption">Alert – dismissable</div>
+      </div>
+      <!-- Tabs specimen -->
+      <div class="card" style="max-width:260px;">
+        <div class="tabs" id="demoTabs">
+          <div class="tab-buttons">
+            <button class="active" data-tab="1">Tab 1</button>
+            <button data-tab="2">Tab 2</button>
+          </div>
+          <div class="tab-content" id="tabContent">Content for Tab 1</div>
+        </div>
+        <div class="card-caption">Tabs – click to switch</div>
+      </div>
+      <!-- Tooltip specimen -->
+      <div class="card">
+        <span class="tooltip" data-tip="Helpful hint!">Hover me</span>
+        <div class="card-caption">Tooltip – hover for tip</div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="container">
+    <div class="logo" style="font-weight:600;">ArchUI</div>
+    <div>Built from a design brief</div>
+  </footer>
+
+<script>
+  // Toggle caption updater
+  const toggle = document.getElementById('demoToggle');
+  const toggleCaption = document.getElementById('toggleCaption');
+  if (toggle) {
+    toggle.addEventListener('change', () => {
+      toggleCaption.textContent = toggle.checked ? 'Toggle – on' : 'Toggle – off';
+    });
+  }
+
+  // Simple tabs logic
+  const tabContainer = document.getElementById('demoTabs');
+  if (tabContainer) {
+    const buttons = tabContainer.querySelectorAll('.tab-buttons button');
+    const content = tabContainer.querySelector('#tabContent');
+    const texts = {
+      1: 'Content for Tab 1',
+      2: 'Content for Tab 2'
+    };
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        buttons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.tab;
+        content.textContent = texts[tab];
+      });
+    });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Dribbble → Workflow → UIs</title><style>
+  :root{--stone:#EDE9DE;--ink:#232823;--green:#435D56;--card:#F7F4EC}
+  *{box-sizing:border-box;margin:0} body{background:var(--stone);color:var(--ink);font:14px/1.5 ui-sans-serif,system-ui;padding:34px 20px}
+  .wrap{max-width:1420px;margin:0 auto} h1{font-size:27px;letter-spacing:-.02em} h1 b{color:var(--green)}
+  .brief{display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--card);border:1px solid #d8d2c2;border-radius:14px;padding:14px 16px;margin:14px 0}
+  .brief b{font-size:15px} .brief i{font-style:normal;color:#6b7166;font-size:12px}
+  .sw{display:flex;gap:4px} .sw span{width:26px;height:26px;border-radius:6px;border:1px solid rgba(0,0,0,.12)}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .tab{border:1px solid #cfc8b6;background:var(--card);border-radius:999px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer}
+  .tab.on{background:var(--green);color:#fff;border-color:var(--green)}
+  .tab i{display:block;font-style:normal;font-weight:400;font-size:10px;opacity:.75}
+  .stage{background:var(--card);border:1px solid #d8d2c2;border-radius:16px;padding:10px}
+  iframe{width:100%;height:760px;border:none;border-radius:12px;background:#fff;display:none} iframe.on{display:block}
+</style></head><body><div class="wrap">
+  <h1>Dribbble → minted workflow → <b>three UIs</b></h1>
+  <div class="brief"><div><b>ArchUI React Component Library</b><br><i>architecture · blueprint · component · design-system · figma · graphic-design · library · react</i></div>
+    <div class="sw"><span style="background:#D8E4FD" title="#D8E4FD"></span><span style="background:#B9CBF0" title="#B9CBF0"></span><span style="background:#909AB5" title="#909AB5"></span><span style="background:#738DC2" title="#738DC2"></span><span style="background:#4961A5" title="#4961A5"></span><span style="background:#0A1A60" title="#0A1A60"></span></div>
+    <i>scraped by Python from <a href="https://dribbble.com/shots/26920194-ArchUI-React-Component-Library">the shot</a> · workflow = agent #48 on Robinhood Chain</i></div>
+  <div class="tabs"><button class="tab on" data-i="0">gemma-4-31b<i>6.1s · ⬡54,626 ($0.012)</i></button><button class="tab " data-i="1">gpt-oss-120b<i>4.7s · ⬡47,760 ($0.011)</i></button><button class="tab " data-i="2">qwen3-32b<i>51.9s · ⬡73,244 ($0.017)</i></button></div>
+  <div class="stage"><iframe data-i="0" src="uis/gemma-4-31b-cerebras/index.html" class="on"></iframe><iframe data-i="1" src="uis/openai-gpt-oss-120b-cerebras/index.html" class=""></iframe><iframe data-i="2" src="uis/qwen-qwen3-32b/index.html" class=""></iframe></div>
+<script>const t=[...document.querySelectorAll(".tab")],f=[...document.querySelectorAll("iframe")];
+t.forEach(b=>b.onclick=()=>{t.forEach(x=>x.classList.toggle("on",x===b));f.forEach(x=>x.classList.toggle("on",x.dataset.i===b.dataset.i));});</script>
+</div></body></html>

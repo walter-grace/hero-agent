@@ -1,0 +1,56 @@
+{
+  "brief": {
+    "url": "https://dribbble.com/shots/26920194-ArchUI-React-Component-Library",
+    "title": "ArchUI React Component Library",
+    "desc": "ArchUI React Component Library designed by Antonio &quot;Toti&quot; Ruiz. Connect with them on Dribbble; the global community for designers and creative professionals.",
+    "tags": [
+      "architecture",
+      "blueprint",
+      "component",
+      "design-system",
+      "figma",
+      "graphic-design",
+      "library",
+      "react",
+      "storybook",
+      "tailwind",
+      "ui-kit",
+      "ux"
+    ],
+    "colors": [
+      "#D8E4FD",
+      "#B9CBF0",
+      "#909AB5",
+      "#738DC2",
+      "#4961A5",
+      "#0A1A60"
+    ],
+    "image": "https://cdn.dribbble.com/userupload/46177008/file/0ab151a87d871a0c2d62b23d554c5cbc.png?resize=1600x1200"
+  },
+  "results": [
+    {
+      "model": "gemma-4-31b@cerebras",
+      "slug": "gemma-4-31b-cerebras",
+      "secs": 6.1,
+      "cost": 54626,
+      "ok": true,
+      "err": null
+    },
+    {
+      "model": "openai/gpt-oss-120b@cerebras",
+      "slug": "openai-gpt-oss-120b-cerebras",
+      "secs": 4.7,
+      "cost": 47760,
+      "ok": true,
+      "err": null
+    },
+    {
+      "model": "qwen/qwen3-32b",
+      "slug": "qwen-qwen3-32b",
+      "secs": 51.9,
+      "cost": 73244,
+      "ok": true,
+      "err": null
+    }
+  ]
+}
