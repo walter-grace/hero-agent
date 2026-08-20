@@ -1,8 +1,19 @@
-// On-chain memory backend: the differentiator. Memories are AES-256-GCM encrypted with a key
-// derived from the agent wallet's own signature, gzip'd, and written to the Agent Memory contract on
-// Robinhood Chain. On-chain observers (and Hero Run) see only random bytes; only the wallet that
-// holds AGENT_PRIVATE_KEY can decrypt. Raw checkpoints are immutable leaves; the ROOT index from
+// On-chain memory backend: the differentiator. Checkpoints are gzip'd and written to the Agent
+// Memory contract on Robinhood Chain. Raw checkpoints are immutable leaves; the ROOT index from
 // compaction is just another (marked) checkpoint. Same interface as LocalMemory.
+//
+// VISIBILITY IS PER ENTRY, and the marker byte is the whole story — do not read "on-chain memory"
+// as a synonym for "encrypted":
+//   marker 2  append()        AES-256-GCM under a key derived from the agent wallet's own signature.
+//                             Observers (and Hero Run) see random bytes; only AGENT_PRIVATE_KEY opens it.
+//   marker 3  appendRoom()    encrypted under a shared room key — every member can read it, nobody else.
+//   marker 0  appendPublic()  NOT ENCRYPTED. Plaintext, world-readable by anyone with the agent id
+//                             and no wallet at all, and permanent once written.
+//
+// This header used to claim encryption unconditionally while appendPublic sat 100 lines below it,
+// which is how the MCP's memory_write ended up reporting "on-chain observers see random bytes" on
+// writes that had just been published in the clear (fixed there too). A caller who believes a public
+// write was private cannot undo it: the bytes are on chain.
 //
 // Requires: AGENT_PRIVATE_KEY (a wallet you control, funded with a little RH gas) and `viem`.
 // This mirrors the browser SDK the herorunai.com/agent page uses (lib/agent-memory.js), ported to
