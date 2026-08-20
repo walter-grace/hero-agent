@@ -59,43 +59,94 @@ export async function listModels(key) {
   if (!r.ok || d.error) throw new Error(d.error?.message || `models failed (${r.status})`);
   return d.data.map((m) => m.id);
 }
+// Rich catalog rows (gateways, provider, price) so pickers can be searched by how a model is SERVED
+// ("cerebras", "groq"), not only by what it is called. Cached for the session; falls back to bare ids.
+let _catalog = null;
+export async function catalogModels() {
+  if (_catalog) return _catalog;
+  try {
+    const r = await fetch(`${BASE}/api/models`);
+    const j = await r.json();
+    const list = Array.isArray(j) ? j : j.models || [];
+    _catalog = list.filter((m) => m.kind === "text" || !m.kind).map((m) => ({
+      id: m.id, provider: m.provider || "", hero: m.hero || 0,
+      gateways: m.gateways || (m.gateway ? [m.gateway] : []),
+    }));
+  } catch { _catalog = []; }
+  return _catalog;
+}
 
 // ---- streaming chat over the OpenAI-compatible endpoint ----
 // onDelta fires per content chunk; the resolved model + $HERO charged ride the final usage frame.
-export async function streamChat({ key, model, messages, maxTokens = 1200, signal, onDelta }) {
+// A model served by exactly ONE gateway has no failover: if that provider is down, the model is
+// simply gone. That is not rare — 339 of the catalog's text models are single-route — and it is not
+// hypothetical: Cerebras hit a 402 quota wall and took gemma-4-31b, its only route, fully offline.
+// herorunai.com's own chat died the same way because its declared fallback model was never actually
+// wired up, so it looked protected and wasn't.
+//
+// Retrying here is safe in a way it is not mid-stream: this fires before a single token has been
+// read, so there is no half-written answer to contradict. FALLBACK_MODEL is "auto" on purpose — the
+// router picks something currently serving rather than pinning a second model that can also be down.
+export const FALLBACK_MODEL = "auto";
+const OUTAGE = /\b(402|429|5\d\d)\b|payment required|quota|insufficient|unavailable|no gateway|nothing usable|rate limit/i;
+
+export async function streamChat({ key, model, messages, maxTokens = 1200, signal, onDelta, fallbackModel = FALLBACK_MODEL, onFallback }) {
   const t0 = Date.now();
-  const r = await fetch(`${BASE}/v1/chat/completions`, {
+  const post = (m) => fetch(`${BASE}/v1/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, messages, stream: true, max_tokens: maxTokens, stream_options: { include_usage: true } }),
+    body: JSON.stringify({ model: m, messages, stream: true, max_tokens: maxTokens, stream_options: { include_usage: true } }),
     signal,
   });
-  if (!r.ok) {
-    const d = await r.json().catch(() => ({}));
-    throw new Error(d.error?.message || `request failed (${r.status})`);
-  }
-  const reader = r.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "", text = "", meta = {};
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const frames = buf.split("\n\n");
-    buf = frames.pop();
-    for (const f of frames) {
-      const line = f.split("\n").find((l) => l.startsWith("data: "));
-      if (!line) continue;
-      const payload = line.slice(6);
-      if (payload === "[DONE]") continue;
-      let d; try { d = JSON.parse(payload); } catch { continue; }
-      if (d.error) throw new Error(d.error.message || "run failed");
-      const delta = d.choices?.[0]?.delta?.content;
-      if (delta) { text += delta; onDelta?.(delta); }
-      if (d.usage) meta = { usage: d.usage, ...d.x_hero };
+
+  // One full attempt. Errors carry `streamed` so the caller can tell a dead model (nothing was ever
+  // emitted, safe to retry elsewhere) from a failure part-way through an answer (retrying would
+  // contradict text the user has already read). A provider outage arrives BOTH ways — as a non-2xx
+  // and, more often here, as an error frame inside a 200 stream — so both paths tag it.
+  async function attempt(m) {
+    let streamed = false;
+    const fail = (msg) => { const e = new Error(msg); e.streamed = streamed; throw e; };
+    const r = await post(m);
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      fail(d.error?.message || `request failed (${r.status})`);
     }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", text = "", meta = {};
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const frames = buf.split("\n\n");
+      buf = frames.pop();
+      for (const f of frames) {
+        const line = f.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        const payload = line.slice(6);
+        if (payload === "[DONE]") continue;
+        let d; try { d = JSON.parse(payload); } catch { continue; }
+        if (d.error) fail(d.error.message || "run failed");
+        const delta = d.choices?.[0]?.delta?.content;
+        if (delta) { streamed = true; text += delta; onDelta?.(delta); }
+        if (d.usage) meta = { usage: d.usage, ...d.x_hero };
+      }
+    }
+    return { text, seconds: (Date.now() - t0) / 1000, resolvedModel: meta.resolved_model || m, charged: meta.charged_hero ?? null, usage: meta.usage || null, gateway: meta.gateway };
   }
-  return { text, seconds: (Date.now() - t0) / 1000, resolvedModel: meta.resolved_model || model, charged: meta.charged_hero ?? null, usage: meta.usage || null, gateway: meta.gateway };
+
+  try {
+    return await attempt(model);
+  } catch (e) {
+    // Retry only a provider-side outage, and only before anything reached the screen. A bad key or a
+    // malformed request fails identically on every model, so retrying would spend twice to show the
+    // same error later.
+    if (!e.streamed && fallbackModel && model !== fallbackModel && OUTAGE.test(e.message)) {
+      onFallback?.({ from: model, to: fallbackModel, reason: e.message.slice(0, 160) });
+      return await attempt(fallbackModel);
+    }
+    throw e;
+  }
 }
 
 // ---- wallet + chain (lazy: viem loads only when a chain command runs) ----
@@ -303,7 +354,7 @@ export async function agentTurn({ key, model, messages, cwd, onTool, approve, si
   const tools = localTools(cwd);
   tools.find((t) => t.def.function.name === "web_search").run = async ({ query }) => {
     const r = await fetch(`${BASE}/v1/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: "perplexity/sonar-pro", max_tokens: 700, messages: [{ role: "user", content: String(query || "") }] }), signal });
+      body: JSON.stringify({ model: "perplexity/sonar", max_tokens: 700, messages: [{ role: "user", content: String(query || "") }] }), signal });
     const d = await r.json();
     if (!r.ok) return `search failed: ${d.error?.message || r.status}`;
     return d.choices?.[0]?.message?.content || "(no results)";
