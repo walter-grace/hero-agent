@@ -35,7 +35,7 @@ export const HERO_MODE_MAX_STEPS = 12; // hard ceiling, mirrors the interactive 
 // The marker lives inside the step's own text, so a sealed v1 plan needs no format change and older
 // plans keep working (nothing marked = nothing searched).
 export const HM_SEARCH = "[search]";
-export const HERO_SEARCH_MODEL = "perplexity/sonar-pro"; // same live-search model the Hero Agent uses
+export const HERO_SEARCH_MODEL = "perplexity/sonar"; // same live-search model the Hero Agent uses
 export const needsSearch = (step) => String(step || "").trim().toLowerCase().startsWith(HM_SEARCH);
 export const stripSearchMark = (step) => String(step || "").trim().replace(/^\[search\]\s*/i, "");
 
